@@ -90,7 +90,7 @@ class PopulateCucActor extends LoggedUpdateMaintenance {
 
 		do {
 			$res = $dbr->newSelectQueryBuilder()
-				->fields( [ 'cuc_id', 'cuc_user_text' ] )
+				->fields( [ 'cuc_id', 'cuc_user', 'cuc_user_text' ] )
 				->table( 'cu_changes' )
 				->conds( [
 					'cuc_actor' => 0,
@@ -100,7 +100,7 @@ class PopulateCucActor extends LoggedUpdateMaintenance {
 				->fetchResultSet();
 
 			foreach ( $res as $row ) {
-				$actor = $actorStore->findActorIdByName( $row->cuc_user_text, $dbr );
+				$actor = $actorStore->acquireActorId( new UserIdentityValue( $row->cuc_user, $row->cuc_user_text ), $dbw );
 
 				if ( !$actor ) {
 					$failed++;

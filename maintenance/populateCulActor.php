@@ -86,7 +86,7 @@ class PopulateCulActor extends LoggedUpdateMaintenance {
 
 		do {
 			$res = $dbr->newSelectQueryBuilder()
-				->fields( [ 'cul_id', 'cul_user' ] )
+				->fields( [ 'cul_id', 'cul_user', 'cul_user_text' ] )
 				->table( 'cu_log' )
 				->conds( [
 					'cul_actor' => 0,
@@ -96,8 +96,7 @@ class PopulateCulActor extends LoggedUpdateMaintenance {
 				->fetchResultSet();
 
 			foreach ( $res as $row ) {
-				$name = $actorStore->getUserIdentityByUserId( $row->cul_user )->getName();
-				$actor = $actorStore->findActorIdByName( $name, $dbr );
+				$actor = $actorStore->acquireActorId( new UserIdentityValue( $row->cul_user, $row->cul_user_text ), $dbw );
 
 				if ( !$actor ) {
 					$failed++;
