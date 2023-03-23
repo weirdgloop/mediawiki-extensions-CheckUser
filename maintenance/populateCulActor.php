@@ -22,6 +22,7 @@ namespace MediaWiki\CheckUser\Maintenance;
 
 use LoggedUpdateMaintenance;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\User\UserIdentityValue;
 
 $IP = getenv( 'MW_INSTALL_PATH' );
 if ( $IP === false ) {
