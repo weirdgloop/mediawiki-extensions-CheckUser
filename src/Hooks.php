@@ -711,8 +711,9 @@ class Hooks implements
 			);
 		}
 
-		$updater->addPostDatabaseUpdateMaintenance( PopulateCucActor::class );
-		$updater->addPostDatabaseUpdateMaintenance( PopulateCulActor::class );
+		// WGL - Let us run the actor migrations without downtime/read-only time.
+		//$updater->addPostDatabaseUpdateMaintenance( PopulateCucActor::class );
+		//$updater->addPostDatabaseUpdateMaintenance( PopulateCulActor::class );
 
 		if ( !$isCUInstalled ) {
 			// First time so populate cu_changes with recentchanges data.
