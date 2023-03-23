@@ -22,7 +22,6 @@ namespace MediaWiki\CheckUser\Maintenance;
 
 use LoggedUpdateMaintenance;
 use MediaWiki\MediaWikiServices;
-use MediaWiki\User\UserIdentityValue;
 
 $IP = getenv( 'MW_INSTALL_PATH' );
 if ( $IP === false ) {
@@ -87,7 +86,7 @@ class PopulateCulActor extends LoggedUpdateMaintenance {
 
 		do {
 			$res = $dbr->newSelectQueryBuilder()
-				->fields( [ 'cul_id', 'cul_user', 'cul_user_text' ] )
+				->fields( [ 'cul_id', 'cul_user' ] )
 				->table( 'cu_log' )
 				->conds( [
 					'cul_actor' => 0,
@@ -97,7 +96,8 @@ class PopulateCulActor extends LoggedUpdateMaintenance {
 				->fetchResultSet();
 
 			foreach ( $res as $row ) {
-				$actor = $actorStore->acquireActorId( new UserIdentityValue( $row->cul_user, $row->cul_user_text ), $dbw );
+				$name = $actorStore->getUserIdentityByUserId( $row->cul_user )->getName();
+				$actor = $actorStore->findActorIdByName( $name, $dbr );
 
 				if ( !$actor ) {
 					$failed++;
