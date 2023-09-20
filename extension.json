@@ -516,7 +516,6 @@
 				"CheckUserHookRunner",
 				"CheckUserUtilityService",
 				"CommentStore",
-				"CheckUserUnionSelectQueryBuilderFactory",
 				"UserAgentClientHintsLookup",
 				"UserAgentClientHintsFormatter"
 			]
