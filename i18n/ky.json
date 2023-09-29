@@ -1,8 +1,13 @@
 {
 	"@metadata": {
 		"authors": [
-			"Growingup"
+			"Growingup",
+			"Bosogo"
 		]
 	},
-	"checkuser-search-submit": "Издөө"
+	"checkuser-reason": "Себеп:",
+	"checkuser-blocked": "Бөгөттөлгөн",
+	"checkuser-search-submit": "Издөө",
+	"checkuser-investigate-subtitle-cancel-button-label": "Жокко чыгаруу",
+	"checkuser-investigate-subtitle-continue-button-label": "Улантуу"
 }

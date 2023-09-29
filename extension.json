@@ -94,7 +94,12 @@
 				"CheckUserLogService"
 			]
 		},
-		"checkuserlog": "MediaWiki\\CheckUser\\Api\\ApiQueryCheckUserLog"
+		"checkuserlog": {
+			"class": "MediaWiki\\CheckUser\\Api\\ApiQueryCheckUserLog",
+			"services": [
+				"UserFactory"
+			]
+		}
 	},
 	"HookHandlers": {
 		"preferences": {
@@ -244,6 +249,9 @@
 			"checkuser-log": true
 		}
 	},
+	"PrivilegedGroups": [
+		"checkuser"
+	],
 	"AvailableRights": [
 		"checkuser",
 		"checkuser-log"
@@ -277,7 +285,8 @@
 			"services": [
 				"LinkBatchFactory",
 				"PermissionManager",
-				"CommentStore"
+				"CommentStore",
+				"UserFactory"
 			]
 		}
 	},
