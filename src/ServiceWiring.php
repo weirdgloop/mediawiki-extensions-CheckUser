@@ -15,7 +15,6 @@ use MediaWiki\CheckUser\Investigate\Utilities\DurationManager;
 use MediaWiki\CheckUser\Investigate\Utilities\EventLogger;
 use MediaWiki\CheckUser\Logging\TemporaryAccountLoggerFactory;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
-use MediaWiki\CheckUser\Services\CheckUserUnionSelectQueryBuilderFactory;
 use MediaWiki\CheckUser\Services\CheckUserUtilityService;
 use MediaWiki\CheckUser\Services\TokenManager;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
@@ -157,13 +156,6 @@ return [
 	): EventLogger {
 		return new EventLogger(
 			\ExtensionRegistry::getInstance()
-		);
-	},
-	'CheckUserUnionSelectQueryBuilderFactory' => static function (
-		MediaWikiServices $services
-	): CheckUserUnionSelectQueryBuilderFactory {
-		return new CheckUserUnionSelectQueryBuilderFactory(
-			$services->getCommentStore()
 		);
 	},
 	'CheckUserHookRunner' => static function (
