@@ -217,8 +217,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				// don't render parentheses in HTML markup (CSS will provide)
 				false
 			);
-			$ip = IPUtils::isIPAddress( $user ) ? $user : '';
-			if ( $ip ) {
+			if ( $userIsIP ) {
 				$templateParams['userLinks'] = $this->msg( 'checkuser-userlinks-ip', $user )->parse();
 			} elseif ( !$userNonExistent ) {
 				if ( $this->msg( 'checkuser-userlinks' )->exists() ) {
@@ -229,7 +228,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 			// Add global user tools links
 			// Add CentralAuth link for real registered users
 			if ( $this->centralAuthToollink !== false
-				&& !IPUtils::isIPAddress( $user_text )
+				&& !$userIsIP
 				&& !$userNonExistent
 			) {
 				// Get CentralAuth SpecialPage name in UserLang from the first Alias name
@@ -416,9 +415,11 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 			}
 			$this->userSets['edits'][$row->user_text]++;
 			$this->userSets['first'][$row->user_text] = $row->timestamp;
+			// Prettify IP
+			$formattedIP = IPUtils::prettifyIP( $row->ip ) ?? $row->ip;
 			// Treat blank or NULL xffs as empty strings
 			$xff = empty( $row->xff ) ? null : $row->xff;
-			$xff_ip_combo = [ $row->ip, $xff ];
+			$xff_ip_combo = [ $formattedIP, $xff ];
 			// Add this IP/XFF combo for this username if it's not already there
 			if ( !in_array( $xff_ip_combo, $this->userSets['infosets'][$row->user_text] ) ) {
 				$this->userSets['infosets'][$row->user_text][] = $xff_ip_combo;
