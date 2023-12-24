@@ -145,8 +145,10 @@ class ApiQueryCheckUserLogTest extends ApiTestCase {
 
 	/** @dataProvider provideExampleLogEntryDataForReasonFilterTest */
 	public function testReasonFilter(
-		$logType, $targetType, $target, $reason, $targetID, $timestamp, $reasonToSearchFor, $shouldSeeEntry
+		$logType, $targetType, $target, $reason, $targetID, $timestamp,
+		$reasonToSearchFor, $shouldSeeEntry, $logReasonMigrationStage
 	) {
+		$this->setMwGlobals( 'wgCheckUserLogReasonMigrationStage', $logReasonMigrationStage );
 		/** @var CheckUserLogService $checkUserLogService */
 		$checkUserLogService = $this->getServiceContainer()->get( 'CheckUserLogService' );
 		$checkUserLogService->addLogEntry(
@@ -164,7 +166,12 @@ class ApiQueryCheckUserLogTest extends ApiTestCase {
 		$result = $this->doCheckUserLogApiRequest( [
 			'culreason' => $checkUserLogService->getPlaintextReason( $reasonToSearchFor )
 		] )[0]['query']['checkuserlog']['entries'];
-		if ( $shouldSeeEntry ) {
+		if (
+			$shouldSeeEntry &&
+			# When SCHEMA_OLD is set, there is no way to search by a plaintext reason.
+			( $checkUserLogService->getPlaintextReason( $reasonToSearchFor ) === $reasonToSearchFor ||
+			$logReasonMigrationStage !== SCHEMA_COMPAT_OLD )
+		) {
 			$this->assertCount(
 				1, $result, 'A search for the plaintext version of the reason should show one entry.'
 			);

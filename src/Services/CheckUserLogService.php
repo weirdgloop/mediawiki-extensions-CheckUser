@@ -23,25 +23,31 @@ class CheckUserLogService {
 	private LoggerInterface $logger;
 	private ActorStore $actorStore;
 
+	/** @var int */
+	private $culReasonMigrationStage;
+
 	/**
 	 * @param IConnectionProvider $dbProvider
 	 * @param CommentStore $commentStore
 	 * @param CommentFormatter $commentFormatter
 	 * @param LoggerInterface $logger
 	 * @param ActorStore $actorStore
+	 * @param int $culReasonMigrationStage
 	 */
 	public function __construct(
 		IConnectionProvider $dbProvider,
 		CommentStore $commentStore,
 		CommentFormatter $commentFormatter,
 		LoggerInterface $logger,
-		ActorStore $actorStore
+		ActorStore $actorStore,
+		int $culReasonMigrationStage
 	) {
 		$this->dbProvider = $dbProvider;
 		$this->commentStore = $commentStore;
 		$this->commentFormatter = $commentFormatter;
 		$this->logger = $logger;
 		$this->actorStore = $actorStore;
+		$this->culReasonMigrationStage = $culReasonMigrationStage;
 	}
 
 	/**
@@ -84,19 +90,30 @@ class CheckUserLogService {
 			'cul_range_end' => $rangeEnd
 		];
 
-		$plaintextReason = $this->getPlaintextReason( $reason );
+		if ( $this->culReasonMigrationStage & SCHEMA_COMPAT_WRITE_NEW ) {
+			$plaintextReason = $this->getPlaintextReason( $reason );
+		} else {
+			$plaintextReason = '';
+		}
+
+		if ( $this->culReasonMigrationStage & SCHEMA_COMPAT_WRITE_OLD ) {
+			$data['cul_reason'] = $reason;
+		}
 
 		$fname = __METHOD__;
 		$commentStore = $this->commentStore;
 		$logger = $this->logger;
+		$writeNew = $this->culReasonMigrationStage & SCHEMA_COMPAT_WRITE_NEW;
 
 		DeferredUpdates::addCallableUpdate(
 			static function () use (
-				$data, $timestamp, $reason, $plaintextReason, $fname, $dbw, $commentStore, $logger
+				$data, $timestamp, $reason, $plaintextReason, $fname, $dbw, $commentStore, $logger, $writeNew
 			) {
 				try {
-					$data += $commentStore->insert( $dbw, 'cul_reason', $reason );
-					$data += $commentStore->insert( $dbw, 'cul_reason_plaintext', $plaintextReason );
+					if ( $writeNew ) {
+						$data += $commentStore->insert( $dbw, 'cul_reason', $reason );
+						$data += $commentStore->insert( $dbw, 'cul_reason_plaintext', $plaintextReason );
+					}
 					$dbw->newInsertQueryBuilder()
 						->insertInto( 'cu_log' )
 						->row(
