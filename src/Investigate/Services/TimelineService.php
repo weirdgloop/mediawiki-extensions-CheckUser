@@ -2,31 +2,9 @@
 
 namespace MediaWiki\CheckUser\Investigate\Services;
 
-use MediaWiki\CommentStore\CommentStore;
-use MediaWiki\User\UserIdentityLookup;
-use Wikimedia\Rdbms\Database\DbQuoter;
-use Wikimedia\Rdbms\Platform\ISQLPlatform;
+use MediaWiki\CheckUser\CheckUserCommentStore;
 
 class TimelineService extends ChangeService {
-	private CommentStore $commentStore;
-
-	/**
-	 * @param DbQuoter $dbQuoter
-	 * @param ISQLPlatform $sqlPlatform
-	 * @param UserIdentityLookup $userIdentityLookup
-	 * @param CommentStore $commentStore
-	 */
-	public function __construct(
-		DbQuoter $dbQuoter,
-		ISQLPlatform $sqlPlatform,
-		UserIdentityLookup $userIdentityLookup,
-		CommentStore $commentStore
-	) {
-		parent::__construct( $dbQuoter, $sqlPlatform, $userIdentityLookup );
-
-		$this->commentStore = $commentStore;
-	}
-
 	/**
 	 * Get timeline query info
 	 *
@@ -36,7 +14,7 @@ class TimelineService extends ChangeService {
 	 * @return array
 	 */
 	public function getQueryInfo( array $targets, array $excludeTargets, string $start ): array {
-		$commentQuery = $this->commentStore->getJoin( 'cuc_comment' );
+		$commentQuery = CheckUserCommentStore::getStore()->getJoin( 'cuc_comment' );
 
 		return [
 			'tables' => [ 'cu_changes', 'cuc_user_actor' => 'actor' ] + $commentQuery['tables'],

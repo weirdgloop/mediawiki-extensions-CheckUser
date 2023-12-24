@@ -35,8 +35,7 @@ class TimelineServiceTest extends MediaWikiIntegrationTestCase {
 		$timelineService = new TimelineService(
 			new AddQuoterMock(),
 			new SQLPlatform( new AddQuoterMock() ),
-			$userIdentityLookup,
-			$this->getServiceContainer()->getCommentStore()
+			$userIdentityLookup
 		);
 
 		$q = $timelineService->getQueryInfo( $targets, [], $start );
