@@ -49,7 +49,7 @@ return [
 	): CheckUserCommentStore {
 		return new CheckUserCommentStore(
 			$services->getContentLanguage(),
-			SCHEMA_COMPAT_NEW
+			$services->getMainConfig()->get( 'CheckUserCommentMigrationStage' )
 		);
 	},
 	'CheckUserLogCommentStore' => static function (
