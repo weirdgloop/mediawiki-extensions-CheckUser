@@ -7,9 +7,9 @@ use IContextSource;
 use Linker;
 use MediaWiki\Cache\LinkBatchFactory;
 use MediaWiki\CheckUser\CheckUser\SpecialCheckUserLog;
+use MediaWiki\CheckUser\CheckUserLogCommentStore;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
 use MediaWiki\CommentFormatter\CommentFormatter;
-use MediaWiki\CommentStore\CommentStore;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\User\ActorStore;
 use MediaWiki\User\UserFactory;
@@ -25,9 +25,9 @@ class CheckUserLogPager extends RangeChronologicalPager {
 	private array $opts;
 
 	private LinkBatchFactory $linkBatchFactory;
+	private CheckUserLogCommentStore $checkUserLogCommentStore;
 	private CommentFormatter $commentFormatter;
 	private CheckUserLogService $checkUserLogService;
-	private CommentStore $commentStore;
 	private UserFactory $userFactory;
 	private ActorStore $actorStore;
 
@@ -38,7 +38,7 @@ class CheckUserLogPager extends RangeChronologicalPager {
 	 * 		Start and end should be timestamps. Year and month are converted to end but ignored if end is
 	 * 		provided.
 	 * @param LinkBatchFactory $linkBatchFactory
-	 * @param CommentStore $commentStore
+	 * @param CheckUserLogCommentStore $checkUserLogCommentStore
 	 * @param CommentFormatter $commentFormatter
 	 * @param CheckUserLogService $checkUserLogService
 	 * @param UserFactory $userFactory
@@ -48,7 +48,7 @@ class CheckUserLogPager extends RangeChronologicalPager {
 		IContextSource $context,
 		array $opts,
 		LinkBatchFactory $linkBatchFactory,
-		CommentStore $commentStore,
+		CheckUserLogCommentStore $checkUserLogCommentStore,
 		CommentFormatter $commentFormatter,
 		CheckUserLogService $checkUserLogService,
 		UserFactory $userFactory,
@@ -56,7 +56,7 @@ class CheckUserLogPager extends RangeChronologicalPager {
 	) {
 		parent::__construct( $context );
 		$this->linkBatchFactory = $linkBatchFactory;
-		$this->commentStore = $commentStore;
+		$this->checkUserLogCommentStore = $checkUserLogCommentStore;
 		$this->commentFormatter = $commentFormatter;
 		$this->checkUserLogService = $checkUserLogService;
 		$this->userFactory = $userFactory;
@@ -215,7 +215,7 @@ class CheckUserLogPager extends RangeChronologicalPager {
 			)
 		)->text();
 		$rowContent .= $this->commentFormatter->formatBlock(
-			$this->commentStore->getComment( 'cul_reason', $row )->text
+			CheckUserLogCommentStore::getStore()->getComment( 'cul_reason', $row )->text
 		);
 
 		$attribs = [
@@ -263,7 +263,7 @@ class CheckUserLogPager extends RangeChronologicalPager {
 			'options' => [],
 		];
 
-		$reasonCommentQuery = $this->commentStore->getJoin( 'cul_reason' );
+		$reasonCommentQuery = $this->checkUserLogCommentStore->getJoin( 'cul_reason' );
 		$queryInfo['tables'] += $reasonCommentQuery['tables'];
 		$queryInfo['fields'] += $reasonCommentQuery['fields'];
 		$queryInfo['join_conds'] += $reasonCommentQuery['joins'];
@@ -404,7 +404,7 @@ class CheckUserLogPager extends RangeChronologicalPager {
 			return $queryInfo;
 		}
 
-		$plaintextReasonCommentQuery = $this->commentStore->getJoin( 'cul_reason_plaintext' );
+		$plaintextReasonCommentQuery = $this->checkUserLogCommentStore->getJoin( 'cul_reason_plaintext' );
 		$queryInfo['tables'] += $plaintextReasonCommentQuery['tables'];
 		$queryInfo['fields'] += $plaintextReasonCommentQuery['fields'];
 		$queryInfo['join_conds'] += $plaintextReasonCommentQuery['joins'];
