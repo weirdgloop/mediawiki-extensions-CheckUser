@@ -435,7 +435,8 @@
 				"type": "bigint",
 				"options": {
 					"unsigned": true,
-					"notnull": true
+					"notnull": true,
+					"default": 0
 				}
 			},
 			{
@@ -444,7 +445,8 @@
 				"type": "bigint",
 				"options": {
 					"unsigned": true,
-					"notnull": true
+					"notnull": true,
+					"default": 0
 				}
 			},
 			{
