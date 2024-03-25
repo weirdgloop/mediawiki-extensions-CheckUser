@@ -491,9 +491,7 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 				'user' => 'actor_user',
 				'user_text' => 'actor_name',
 				// Needed for rows with cuc_type as RC_LOG.
-				'comment_text',
-				'comment_data',
-			],
+			] + $commentQuery['fields'],
 			'tables' => [ 'cu_changes', 'actor_cuc_user' => 'actor' ] + $commentQuery['tables'],
 			'conds' => [],
 			'join_conds' => [
@@ -533,14 +531,12 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 				'agent' => 'cule_agent',
 				'user' => 'actor_user',
 				'user_text' => 'actor_name',
-				'comment_text',
-				'comment_data',
 				'log_type' => 'log_type',
 				'log_action' => 'log_action',
 				'log_params' => 'log_params',
 				'log_deleted' => 'log_deleted',
 				'log_id' => 'cule_log_id',
-			],
+			] + $commentQuery['fields'],
 			'tables' => [
 				'cu_log_event', 'logging_cule_log_id' => 'logging', 'actor_log_actor' => 'actor'
 			] + $commentQuery['tables'],
@@ -590,14 +586,12 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 				'agent' => 'cupe_agent',
 				'user' => 'actor_user',
 				'user_text' => 'actor_name',
-				'comment_text',
-				'comment_data',
 				'log_type' => 'cupe_log_type',
 				'log_action' => 'cupe_log_action',
 				'log_params' => 'cupe_params',
 				// cu_private_event log events cannot be deleted or suppressed.
 				'log_deleted' => 0,
-			],
+			] + $commentQuery['fields'],
 			'tables' => [ 'cu_private_event', 'actor_cupe_actor' => 'actor' ] + $commentQuery['tables'],
 			'conds' => [],
 			'join_conds' => [
