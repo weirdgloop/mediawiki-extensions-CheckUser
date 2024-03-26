@@ -186,13 +186,11 @@ class SchemaChangesHandler implements LoadExtensionSchemaUpdatesHook {
 			PopulateCulActor::class,
 			'extensions/CheckUser/maintenance/populateCulActor.php'
 		] );
-		/* WGL - Disable update.php migrations.
 		$updater->addExtensionUpdate( [
 			'runMaintenance',
 			PopulateCulComment::class,
 			'extensions/CheckUser/maintenance/populateCulComment.php'
 		] );
-		*/
 		if ( $dbType === 'postgres' ) {
 			# For wikis which ran update.php after pulling the master branch of CheckUser between
 			#  4 June 2022 and 6 June 2022, the cul_reason_id and cul_reason_plaintext_id columns
@@ -212,13 +210,11 @@ class SchemaChangesHandler implements LoadExtensionSchemaUpdatesHook {
 			PopulateCucActor::class,
 			'extensions/CheckUser/maintenance/populateCucActor.php'
 		] );
-		/* WGL - Disable update.php migrations.
 		$updater->addExtensionUpdate( [
 			'runMaintenance',
 			PopulateCucComment::class,
 			'extensions/CheckUser/maintenance/populateCucComment.php'
 		] );
-		*/
 
 		// 1.40
 		$updater->addExtensionTable(
@@ -268,9 +264,7 @@ class SchemaChangesHandler implements LoadExtensionSchemaUpdatesHook {
 		// 1.41
 		$updater->addExtensionTable( 'cu_useragent_clienthints', "$base/$dbType/cu_useragent_clienthints.sql" );
 		$updater->addExtensionTable( 'cu_useragent_clienthints_map', "$base/$dbType/cu_useragent_clienthints_map.sql" );
-		/* WGL - Disable update.php migrations.
 		$updater->addPostDatabaseUpdateMaintenance( MoveLogEntriesFromCuChanges::class );
-		*/
 
 		if ( !$isCUInstalled ) {
 			// First time so populate cu_changes with recentchanges data.

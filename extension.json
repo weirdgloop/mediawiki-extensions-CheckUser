@@ -88,12 +88,11 @@
 			"description": "Number of seconds for which the temporary account API response is fresh"
 		},
 		"CheckUserCommentMigrationStage": {
-			"value": 259,
-			"description": "A flag used to represent the stage of the migration to the comment table. Default is to write to new and old, and read from old."
+			"value": 769
 		},
 		"CheckUserLogReasonMigrationStage": {
-			"value": 259,
-			"description": "A flag used to represent the stage of the migration to the comment table. Default is to write to new and old, and read from old."
+			"value": 769,
+			"description": "A flag used to represent the stage of the migration to the comment table. Default is to write to new and old, and read from new."
 		},
 		"CheckUserEventTablesMigrationStage": {
 			"value": 259,
