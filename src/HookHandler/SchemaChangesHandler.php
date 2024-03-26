@@ -265,6 +265,11 @@ class SchemaChangesHandler implements LoadExtensionSchemaUpdatesHook {
 			'cuc_only_for_read_old',
 			"$base/$dbType/patch-cu_changes-add-cuc_only_for_read_old.sql"
 		);
+		$updater->dropExtensionField(
+			'cu_changes',
+			'cuc_comment',
+			"$base/$dbType/patch-cu_changes-drop-cuc_comment.sql"
+		);
 
 		// 1.41
 		$updater->addExtensionTable( 'cu_useragent_clienthints', "$base/$dbType/cu_useragent_clienthints.sql" );
