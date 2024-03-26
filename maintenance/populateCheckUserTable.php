@@ -4,7 +4,6 @@ namespace MediaWiki\CheckUser\Maintenance;
 
 use DatabaseLogEntry;
 use LoggedUpdateMaintenance;
-use MediaWiki\CheckUser\Hooks;
 use MediaWiki\MediaWikiServices;
 use RecentChange;
 use Wikimedia\IPUtils;
@@ -90,12 +89,8 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 
 		$services = MediaWikiServices::getInstance();
 		$lbFactory = $services->getDBLoadBalancerFactory();
-
-		$commentMigrationStage = $services->getMainConfig()->get( 'CheckUserCommentMigrationStage' );
-
 		$commentStore = $services->getCommentStore();
 		$rcQuery = RecentChange::getQueryInfo();
-		$contLang = $services->getContentLanguage();
 
 		while ( $blockStart <= $end ) {
 			$this->output( "...migrating rc_id from $blockStart to $blockEnd\n" );
@@ -155,6 +150,7 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 						'cuc_namespace' => $row->rc_namespace,
 						'cuc_title' => $row->rc_title,
 						'cuc_actor' => $row->rc_actor,
+						'cuc_comment_id' => $comment->id,
 						'cuc_minor' => $row->rc_minor,
 						'cuc_page_id' => $row->rc_cur_id,
 						'cuc_this_oldid' => $row->rc_this_oldid,
@@ -164,14 +160,6 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 						'cuc_ip_hex' => IPUtils::toHex( $row->rc_ip ),
 						'cuc_only_for_read_old' => 0,
 					];
-					if ( $commentMigrationStage & SCHEMA_COMPAT_WRITE_OLD ) {
-						$cuChangesRow['cuc_comment'] = $contLang->truncateForDatabase(
-							$comment->text, Hooks::TEXT_FIELD_LENGTH
-						);
-					}
-					if ( $commentMigrationStage & SCHEMA_COMPAT_WRITE_NEW ) {
-						$cuChangesRow['cuc_comment_id'] = $comment->id;
-					}
 					if (
 						$row->rc_type == RC_LOG &&
 						( $eventTablesMigrationStage & SCHEMA_COMPAT_WRITE_NEW )

@@ -339,7 +339,6 @@ class CheckUserGetEditsPagerTest extends CheckUserPagerCommonTest {
 			'ip' => '127.0.0.1',
 			'xff' => '',
 			'agent' => '',
-			'comment' => '',
 			'comment_id' => 0,
 			'comment_text' => '',
 			'comment_data' => null,

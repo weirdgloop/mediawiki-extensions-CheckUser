@@ -111,8 +111,8 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 			'Other defaults' => [
 				[],
 				[ 'cuc_page_id', 'cuc_namespace', 'cuc_minor', 'cuc_title', 'cuc_actiontext',
-					'cuc_comment', 'cuc_this_oldid', 'cuc_last_oldid', 'cuc_type', 'cuc_agent' ],
-				[ 0, NS_MAIN, 0, '', '', '', 0, 0, RC_LOG, '' ]
+					'cuc_this_oldid', 'cuc_last_oldid', 'cuc_type', 'cuc_agent' ],
+				[ 0, NS_MAIN, 0, '', '', 0, 0, RC_LOG, '' ]
 			]
 		];
 	}
@@ -128,7 +128,6 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 
 	public static function provideTestTruncationInsertIntoCuChangesTable() {
 		return [
-			'Comment text column' => [ 'cuc_comment' ],
 			'Action text column' => [ 'cuc_actiontext' ],
 			'XFF column' => [ 'cuc_xff' ]
 		];
