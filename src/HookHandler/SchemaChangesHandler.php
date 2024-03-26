@@ -245,10 +245,10 @@ class SchemaChangesHandler implements LoadExtensionSchemaUpdatesHook {
 				"$base/$dbType/patch-cu_log-drop-actor_default.sql"
 			);
 		}
-		$updater->modifyExtensionField(
+		$updater->dropExtensionField(
 			'cu_log',
 			'cul_reason',
-			"$base/$dbType/patch-cu_log-change-reason_default.sql"
+			"$base/$dbType/patch-cu_log-drop-cul_reason.sql"
 		);
 		$updater->dropExtensionField(
 			'cu_changes',

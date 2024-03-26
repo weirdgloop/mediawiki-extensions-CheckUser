@@ -112,7 +112,6 @@ CREATE INDEX uachm_reference_id ON /*_*/cu_useragent_clienthints_map (uachm_refe
 CREATE TABLE /*_*/cu_log (
   cul_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
   cul_timestamp BLOB NOT NULL, cul_actor BIGINT UNSIGNED NOT NULL,
-  cul_reason BLOB DEFAULT '' NOT NULL,
   cul_reason_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   cul_reason_plaintext_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   cul_type BLOB NOT NULL, cul_target_id INTEGER UNSIGNED DEFAULT 0 NOT NULL,
