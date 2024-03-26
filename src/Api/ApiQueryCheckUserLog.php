@@ -12,7 +12,6 @@ use MediaWiki\User\UserFactory;
 use Wikimedia\IPUtils;
 use Wikimedia\ParamValidator\ParamValidator;
 use Wikimedia\ParamValidator\TypeDef\IntegerDef;
-use Wikimedia\Rdbms\Platform\ISQLPlatform;
 
 /**
  * CheckUser API Query Module
@@ -64,14 +63,10 @@ class ApiQueryCheckUserLog extends ApiQueryBase {
 		$fields += $reasonCommentQuery['fields'];
 
 		if ( isset( $params['reason'] ) ) {
-			if ( $this->getConfig()->get( 'CheckUserLogReasonMigrationStage' ) & SCHEMA_COMPAT_READ_NEW ) {
-				$plaintextReasonCommentQuery = $this->checkUserLogCommentStore->getJoin( 'cul_reason_plaintext' );
-				$this->addTables( $plaintextReasonCommentQuery['tables'] );
-				$this->addJoinConds( $plaintextReasonCommentQuery['joins'] );
-				$fields += $plaintextReasonCommentQuery['fields'];
-			} else {
-				$this->addFields( 'cul_reason' );
-			}
+			$plaintextReasonCommentQuery = $this->checkUserLogCommentStore->getJoin( 'cul_reason_plaintext' );
+			$this->addTables( $plaintextReasonCommentQuery['tables'] );
+			$this->addJoinConds( $plaintextReasonCommentQuery['joins'] );
+			$fields += $plaintextReasonCommentQuery['fields'];
 		}
 
 		$this->addFields( $fields );
@@ -102,20 +97,10 @@ class ApiQueryCheckUserLog extends ApiQueryBase {
 
 		if ( isset( $params['reason'] ) ) {
 			$plaintextReason = $this->checkUserLogService->getPlaintextReason( $params['reason'] );
-			if ( $this->getConfig()->get( 'CheckUserLogReasonMigrationStage' ) & SCHEMA_COMPAT_READ_NEW ) {
-				$this->addWhereFld(
-					'comment_cul_reason_plaintext.comment_text',
-					$plaintextReason
-				);
-			} else {
-				$this->addWhere( $this->getDB()->makeList(
-					[
-						'cul_reason = ' . $this->getDB()->addQuotes( $params['reason'] ),
-						'cul_reason = ' . $this->getDB()->addQuotes( $plaintextReason )
-					],
-					ISQLPlatform::LIST_OR
-				) );
-			}
+			$this->addWhereFld(
+				'comment_cul_reason_plaintext.comment_text',
+				$plaintextReason
+			);
 		}
 
 		if ( $continue !== null ) {

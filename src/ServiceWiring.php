@@ -40,8 +40,7 @@ return [
 			$services->getCommentStore(),
 			$services->getCommentFormatter(),
 			LoggerFactory::getInstance( 'CheckUser' ),
-			$services->getActorStore(),
-			$services->getMainConfig()->get( 'CheckUserLogReasonMigrationStage' )
+			$services->getActorStore()
 		);
 	},
 	'CheckUserCommentStore' => static function (
@@ -57,7 +56,7 @@ return [
 	): CheckUserLogCommentStore {
 		return new CheckUserLogCommentStore(
 			$services->getContentLanguage(),
-			$services->getMainConfig()->get( 'CheckUserLogReasonMigrationStage' )
+			SCHEMA_COMPAT_NEW
 		);
 	},
 	'CheckUserPreliminaryCheckService' => static function (
