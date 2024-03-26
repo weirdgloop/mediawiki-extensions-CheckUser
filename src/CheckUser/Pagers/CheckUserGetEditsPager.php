@@ -14,7 +14,6 @@ use LogPage;
 use ManualLogEntry;
 use MediaWiki\Cache\LinkBatchFactory;
 use MediaWiki\CheckUser\CheckUser\SpecialCheckUser;
-use MediaWiki\CheckUser\CheckUserCommentStore;
 use MediaWiki\CheckUser\ClientHints\ClientHintsBatchFormatterResults;
 use MediaWiki\CheckUser\ClientHints\ClientHintsReferenceIds;
 use MediaWiki\CheckUser\Hook\HookRunner;
@@ -25,6 +24,7 @@ use MediaWiki\CheckUser\Services\UserAgentClientHintsFormatter;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsLookup;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
 use MediaWiki\CommentFormatter\CommentFormatter;
+use MediaWiki\CommentStore\CommentStore;
 use MediaWiki\Html\FormOptions;
 use MediaWiki\Linker\LinkRenderer;
 use MediaWiki\Logger\LoggerFactory;
@@ -78,6 +78,7 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 	private UserEditTracker $userEditTracker;
 	private HookRunner $hookRunner;
 	private CheckUserUtilityService $checkUserUtilityService;
+	private CommentStore $commentStore;
 	private UserAgentClientHintsLookup $clientHintsLookup;
 	private UserAgentClientHintsFormatter $clientHintsFormatter;
 
@@ -102,6 +103,7 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 	 * @param UserEditTracker $userEditTracker
 	 * @param HookRunner $hookRunner
 	 * @param CheckUserUtilityService $checkUserUtilityService
+	 * @param CommentStore $commentStore
 	 * @param UserAgentClientHintsLookup $clientHintsLookup
 	 * @param UserAgentClientHintsFormatter $clientHintsFormatter
 	 * @param IContextSource|null $context
@@ -129,6 +131,7 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 		UserEditTracker $userEditTracker,
 		HookRunner $hookRunner,
 		CheckUserUtilityService $checkUserUtilityService,
+		CommentStore $commentStore,
 		UserAgentClientHintsLookup $clientHintsLookup,
 		UserAgentClientHintsFormatter $clientHintsFormatter,
 		IContextSource $context = null,
@@ -149,6 +152,7 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 		$this->userEditTracker = $userEditTracker;
 		$this->hookRunner = $hookRunner;
 		$this->checkUserUtilityService = $checkUserUtilityService;
+		$this->commentStore = $commentStore;
 		$this->clientHintsLookup = $clientHintsLookup;
 		$this->clientHintsFormatter = $clientHintsFormatter;
 		$this->preCacheMessages();
@@ -206,7 +210,7 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 		if ( $row->type == RC_EDIT || $row->type == RC_NEW ) {
 			$templateParams['comment'] = $this->formattedRevisionComments[$row->this_oldid];
 		} else {
-			$comment = CheckUserCommentStore::getStore()->getComment( 'cuc_comment', $row );
+			$comment = $this->commentStore->getComment( 'comment', $row );
 			$templateParams['comment'] = $this->commentFormatter->formatBlock( $comment->text );
 		}
 		// IP
@@ -473,7 +477,7 @@ class CheckUserGetEditsPager extends AbstractCheckUserPager {
 
 	/** @inheritDoc */
 	protected function getQueryInfoForCuChanges(): array {
-		$commentQuery = CheckUserCommentStore::getStore()->getJoin( 'cuc_comment' );
+		$commentQuery = $this->commentStore->getJoin( 'cuc_comment' );
 		$queryInfo = [
 			'fields' => [
 				'namespace' => 'cuc_namespace',

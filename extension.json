@@ -172,7 +172,8 @@
 				"UserIdentityLookup",
 				"RevisionLookup",
 				"ArchivedRevisionLookup",
-				"CheckUserLogService"
+				"CheckUserLogService",
+				"CommentStore"
 			]
 		},
 		"checkuserlog": {
@@ -515,6 +516,7 @@
 				"UserNameUtils",
 				"CheckUserHookRunner",
 				"CheckUserUtilityService",
+				"CommentStore",
 				"UserAgentClientHintsLookup",
 				"UserAgentClientHintsFormatter"
 			]

@@ -1,6 +1,5 @@
 <?php
 
-use MediaWiki\CheckUser\CheckUserCommentStore;
 use MediaWiki\CheckUser\GuidedTour\TourLauncher;
 use MediaWiki\CheckUser\Hook\HookRunner;
 use MediaWiki\CheckUser\Investigate\Pagers\ComparePagerFactory;
@@ -42,14 +41,6 @@ return [
 			$services->getActorStore()
 		);
 	},
-	'CheckUserCommentStore' => static function (
-		MediaWikiServices $services
-	): CheckUserCommentStore {
-		return new CheckUserCommentStore(
-			$services->getContentLanguage(),
-			SCHEMA_COMPAT_NEW
-		);
-	},
 	'CheckUserPreliminaryCheckService' => static function (
 		MediaWikiServices $services
 	): PreliminaryCheckService {
@@ -74,7 +65,8 @@ return [
 		return new TimelineService(
 			$services->getDBLoadBalancerFactory()->getReplicaDatabase(),
 			$services->getDBLoadBalancerFactory()->getReplicaDatabase(),
-			$services->getUserIdentityLookup()
+			$services->getUserIdentityLookup(),
+			$services->getCommentStore()
 		);
 	},
 	'CheckUserTokenManager' => static function ( MediaWikiServices $services ): TokenManager {
