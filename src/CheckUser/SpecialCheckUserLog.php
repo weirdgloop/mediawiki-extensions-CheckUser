@@ -7,9 +7,9 @@ use Html;
 use HTMLForm;
 use MediaWiki\Cache\LinkBatchFactory;
 use MediaWiki\CheckUser\CheckUser\Pagers\CheckUserLogPager;
-use MediaWiki\CheckUser\CheckUserLogCommentStore;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
 use MediaWiki\CommentFormatter\CommentFormatter;
+use MediaWiki\CommentStore\CommentStore;
 use MediaWiki\Permissions\PermissionManager;
 use MediaWiki\Title\Title;
 use MediaWiki\User\ActorStore;
@@ -31,7 +31,7 @@ class SpecialCheckUserLog extends SpecialPage {
 
 	private LinkBatchFactory $linkBatchFactory;
 	private PermissionManager $permissionManager;
-	private CheckUserLogCommentStore $checkUserLogCommentStore;
+	private CommentStore $commentStore;
 	private CommentFormatter $commentFormatter;
 	private CheckUserLogService $checkUserLogService;
 	private UserFactory $userFactory;
@@ -40,7 +40,7 @@ class SpecialCheckUserLog extends SpecialPage {
 	/**
 	 * @param LinkBatchFactory $linkBatchFactory
 	 * @param PermissionManager $permissionManager
-	 * @param CheckUserLogCommentStore $checkUserLogCommentStore
+	 * @param CommentStore $commentStore
 	 * @param CommentFormatter $commentFormatter
 	 * @param CheckUserLogService $checkUserLogService
 	 * @param UserFactory $userFactory
@@ -50,7 +50,7 @@ class SpecialCheckUserLog extends SpecialPage {
 	public function __construct(
 		LinkBatchFactory $linkBatchFactory,
 		PermissionManager $permissionManager,
-		CheckUserLogCommentStore $checkUserLogCommentStore,
+		CommentStore $commentStore,
 		CommentFormatter $commentFormatter,
 		CheckUserLogService $checkUserLogService,
 		UserFactory $userFactory,
@@ -60,7 +60,7 @@ class SpecialCheckUserLog extends SpecialPage {
 		parent::__construct( 'CheckUserLog', 'checkuser-log' );
 		$this->linkBatchFactory = $linkBatchFactory;
 		$this->permissionManager = $permissionManager;
-		$this->checkUserLogCommentStore = $checkUserLogCommentStore;
+		$this->commentStore = $commentStore;
 		$this->commentFormatter = $commentFormatter;
 		$this->checkUserLogService = $checkUserLogService;
 		$this->userFactory = $userFactory;
@@ -145,7 +145,7 @@ class SpecialCheckUserLog extends SpecialPage {
 			$this->getContext(),
 			$this->opts,
 			$this->linkBatchFactory,
-			$this->checkUserLogCommentStore,
+			$this->commentStore,
 			$this->commentFormatter,
 			$this->checkUserLogService,
 			$this->userFactory,

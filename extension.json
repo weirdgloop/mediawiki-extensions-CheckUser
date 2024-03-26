@@ -178,7 +178,7 @@
 		"checkuserlog": {
 			"class": "MediaWiki\\CheckUser\\Api\\ApiQueryCheckUserLog",
 			"services": [
-				"CheckUserLogCommentStore",
+				"CommentStore",
 				"CheckUserLogService",
 				"UserFactory"
 			]
@@ -524,7 +524,7 @@
 			"services": [
 				"LinkBatchFactory",
 				"PermissionManager",
-				"CheckUserLogCommentStore",
+				"CommentStore",
 				"CommentFormatter",
 				"CheckUserLogService",
 				"UserFactory",
