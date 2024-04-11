@@ -8,8 +8,8 @@ use ApiQueryBase;
 use ApiResult;
 use Exception;
 use MediaWiki\CheckUser\CheckUser\Pagers\AbstractCheckUserPager;
-use MediaWiki\CheckUser\CheckUserCommentStore;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
+use MediaWiki\CommentStore\CommentStore;
 use MediaWiki\Revision\ArchivedRevisionLookup;
 use MediaWiki\Revision\RevisionLookup;
 use MediaWiki\Revision\RevisionRecord;
@@ -28,6 +28,7 @@ class ApiQueryCheckUser extends ApiQueryBase {
 	private RevisionLookup $revisionLookup;
 	private ArchivedRevisionLookup $archivedRevisionLookup;
 	private CheckUserLogService $checkUserLogService;
+	private CommentStore $commentStore;
 
 	/**
 	 * @param ApiQuery $query
@@ -36,6 +37,7 @@ class ApiQueryCheckUser extends ApiQueryBase {
 	 * @param RevisionLookup $revisionLookup
 	 * @param ArchivedRevisionLookup $archivedRevisionLookup
 	 * @param CheckUserLogService $checkUserLogService
+	 * @param CommentStore $commentStore
 	 */
 	public function __construct(
 		$query,
@@ -43,13 +45,15 @@ class ApiQueryCheckUser extends ApiQueryBase {
 		UserIdentityLookup $userIdentityLookup,
 		RevisionLookup $revisionLookup,
 		ArchivedRevisionLookup $archivedRevisionLookup,
-		CheckUserLogService $checkUserLogService
+		CheckUserLogService $checkUserLogService,
+		CommentStore $commentStore
 	) {
 		parent::__construct( $query, $moduleName, 'cu' );
 		$this->userIdentityLookup = $userIdentityLookup;
 		$this->revisionLookup = $revisionLookup;
 		$this->archivedRevisionLookup = $archivedRevisionLookup;
 		$this->checkUserLogService = $checkUserLogService;
+		$this->commentStore = $commentStore;
 	}
 
 	public function execute() {
@@ -80,8 +84,7 @@ class ApiQueryCheckUser extends ApiQueryBase {
 		$targetTitle = Title::makeTitleSafe( NS_USER, $target );
 		$target = $targetTitle ? $targetTitle->getText() : '';
 
-		$commentStore = CheckUserCommentStore::getStore();
-		$commentQuery = $commentStore->getJoin( 'cuc_comment' );
+		$commentQuery = $this->commentStore->getJoin( 'cuc_comment' );
 
 		$this->addTables( [ 'cu_changes', 'actor_cuc_user' => 'actor' ] );
 		$this->addOption( 'LIMIT', $limit + 1 );
@@ -185,7 +188,7 @@ class ApiQueryCheckUser extends ApiQueryBase {
 						'agent'     => $row->cuc_agent,
 					];
 
-					$comment = $commentStore->getComment( 'cuc_comment', $row )->text;
+					$comment = $this->commentStore->getComment( 'cuc_comment', $row )->text;
 
 					if ( $row->cuc_actiontext ) {
 						$edit['summary'] = $row->cuc_actiontext;

@@ -1,7 +1,5 @@
 <?php
 
-use MediaWiki\CheckUser\CheckUserCommentStore;
-use MediaWiki\CheckUser\CheckUserLogCommentStore;
 use MediaWiki\CheckUser\GuidedTour\TourLauncher;
 use MediaWiki\CheckUser\Hook\HookRunner;
 use MediaWiki\CheckUser\Investigate\Pagers\ComparePagerFactory;
@@ -40,24 +38,7 @@ return [
 			$services->getCommentStore(),
 			$services->getCommentFormatter(),
 			LoggerFactory::getInstance( 'CheckUser' ),
-			$services->getActorStore(),
-			$services->getMainConfig()->get( 'CheckUserLogReasonMigrationStage' )
-		);
-	},
-	'CheckUserCommentStore' => static function (
-		MediaWikiServices $services
-	): CheckUserCommentStore {
-		return new CheckUserCommentStore(
-			$services->getContentLanguage(),
-			$services->getMainConfig()->get( 'CheckUserCommentMigrationStage' )
-		);
-	},
-	'CheckUserLogCommentStore' => static function (
-		MediaWikiServices $services
-	): CheckUserLogCommentStore {
-		return new CheckUserLogCommentStore(
-			$services->getContentLanguage(),
-			$services->getMainConfig()->get( 'CheckUserLogReasonMigrationStage' )
+			$services->getActorStore()
 		);
 	},
 	'CheckUserPreliminaryCheckService' => static function (
@@ -84,7 +65,8 @@ return [
 		return new TimelineService(
 			$services->getDBLoadBalancerFactory()->getReplicaDatabase(),
 			$services->getDBLoadBalancerFactory()->getReplicaDatabase(),
-			$services->getUserIdentityLookup()
+			$services->getUserIdentityLookup(),
+			$services->getCommentStore()
 		);
 	},
 	'CheckUserTokenManager' => static function ( MediaWikiServices $services ): TokenManager {

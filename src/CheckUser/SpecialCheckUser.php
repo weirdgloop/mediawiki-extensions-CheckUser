@@ -21,6 +21,7 @@ use MediaWiki\CheckUser\Services\TokenQueryManager;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsFormatter;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsLookup;
 use MediaWiki\CommentFormatter\CommentFormatter;
+use MediaWiki\CommentStore\CommentStore;
 use MediaWiki\Html\FormOptions;
 use MediaWiki\Page\WikiPageFactory;
 use MediaWiki\Permissions\PermissionManager;
@@ -85,6 +86,7 @@ class SpecialCheckUser extends SpecialPage {
 	private UserNameUtils $userNameUtils;
 	private HookRunner $hookRunner;
 	private CheckUserUtilityService $checkUserUtilityService;
+	private CommentStore $commentStore;
 	private UserAgentClientHintsLookup $clientHintsLookup;
 	private UserAgentClientHintsFormatter $clientHintsFormatter;
 
@@ -110,6 +112,7 @@ class SpecialCheckUser extends SpecialPage {
 	 * @param UserNameUtils $userNameUtils
 	 * @param HookRunner $hookRunner
 	 * @param CheckUserUtilityService $checkUserUtilityService
+	 * @param CommentStore $commentStore
 	 * @param UserAgentClientHintsLookup $clientHintsLookup
 	 * @param UserAgentClientHintsFormatter $clientHintsFormatter
 	 */
@@ -135,6 +138,7 @@ class SpecialCheckUser extends SpecialPage {
 		UserNameUtils $userNameUtils,
 		HookRunner $hookRunner,
 		CheckUserUtilityService $checkUserUtilityService,
+		CommentStore $commentStore,
 		UserAgentClientHintsLookup $clientHintsLookup,
 		UserAgentClientHintsFormatter $clientHintsFormatter
 	) {
@@ -161,6 +165,7 @@ class SpecialCheckUser extends SpecialPage {
 		$this->userNameUtils = $userNameUtils;
 		$this->hookRunner = $hookRunner;
 		$this->checkUserUtilityService = $checkUserUtilityService;
+		$this->commentStore = $commentStore;
 		$this->clientHintsLookup = $clientHintsLookup;
 		$this->clientHintsFormatter = $clientHintsFormatter;
 	}
@@ -784,6 +789,7 @@ class SpecialCheckUser extends SpecialPage {
 					$this->userEditTracker,
 					$this->hookRunner,
 					$this->checkUserUtilityService,
+					$this->commentStore,
 					$this->clientHintsLookup,
 					$this->clientHintsFormatter
 				);

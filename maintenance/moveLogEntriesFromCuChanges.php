@@ -95,9 +95,6 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 			"Moving log entries from cu_changes to cu_private_event with cuc_id from $start to $end.\n"
 		);
 
-		$commentMigrationStage = $services->getMainConfig()->get( 'CheckUserCommentMigrationStage' );
-		$commentStore = $services->getCommentStore();
-
 		while ( $blockStart <= $end ) {
 			$this->output( "...checking and moving log entries with cuc_id from $blockStart to $blockEnd\n" );
 			$res = $dbw->newSelectQueryBuilder()
@@ -107,7 +104,6 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 					'cuc_title',
 					'cuc_actor',
 					'cuc_actiontext',
-					'cuc_comment',
 					'cuc_comment_id',
 					'cuc_page_id',
 					'cuc_timestamp',
@@ -129,7 +125,7 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 			$batch = [];
 			$setOnlyForReadOldBatch = [];
 			foreach ( $res as $row ) {
-				$entry = [
+				$batch[] = [
 					'cupe_timestamp' => $row->cuc_timestamp,
 					'cupe_namespace' => $row->cuc_namespace,
 					'cupe_title' => $row->cuc_title,
@@ -138,6 +134,7 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 					'cupe_log_action' => 'migrated-cu_changes-log-event',
 					'cupe_log_type' => 'checkuser-private-event',
 					'cupe_params' => LogEntryBase::makeParamBlob( [ '4::actiontext' => $row->cuc_actiontext ] ),
+					'cupe_comment_id' => $row->cuc_comment_id,
 					'cupe_ip' => $row->cuc_ip,
 					'cupe_ip_hex' => $row->cuc_ip_hex,
 					'cupe_xff' => $row->cuc_xff,
@@ -145,14 +142,6 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 					'cupe_agent' => $row->cuc_agent,
 					'cupe_private' => $row->cuc_private
 				];
-
-				if ( $commentMigrationStage & SCHEMA_COMPAT_READ_NEW ) {
-					$entry['cupe_comment_id'] = $row->cuc_comment_id;
-				} else {
-					$entry['cupe_comment_id'] = $commentStore->createComment( $dbw, $row->cuc_comment )->id;
-				}
-
-				$batch[] = $entry;
 				$setOnlyForReadOldBatch[] = $row->cuc_id;
 			}
 			if ( count( $batch ) ) {

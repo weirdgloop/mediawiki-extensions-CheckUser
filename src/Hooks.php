@@ -47,7 +47,7 @@ class Hooks implements
 
 	/**
 	 * The maximum number of bytes that fit in CheckUser's text fields
-	 * (cuc_agent,cuc_actiontext,cuc_comment,cuc_xff)
+	 * (cuc_agent,cuc_actiontext,cuc_xff)
 	 */
 	public const TEXT_FIELD_LENGTH = 255;
 
@@ -445,8 +445,6 @@ class Hooks implements
 		);
 		$row['cuc_xff'] = $contLang->truncateForDatabase( $row['cuc_xff'], self::TEXT_FIELD_LENGTH );
 
-		$commentMigrationStage = $services->getMainConfig()->get( 'CheckUserCommentMigrationStage' );
-
 		if ( !isset( $row['cuc_actor'] ) ) {
 			$row['cuc_actor'] = $services->getActorStore()->acquireActorId(
 				$user,
@@ -455,18 +453,13 @@ class Hooks implements
 		}
 
 		if ( !isset( $row['cuc_comment_id'] ) ) {
-			$row += CheckUserCommentStore::getStore()->insert(
+			$row += $services->getCommentStore()->insert(
 				$dbw,
 				'cuc_comment',
 				$row['cuc_comment']
 			);
 		}
-
-		if ( $commentMigrationStage & SCHEMA_COMPAT_WRITE_OLD ) {
-			$row['cuc_comment'] = $contLang->truncateForDatabase( $row['cuc_comment'], self::TEXT_FIELD_LENGTH );
-		} else {
-			unset( $row['cuc_comment'] );
-		}
+		unset( $row['cuc_comment'] );
 
 		$dbw->newInsertQueryBuilder()
 			->insertInto( 'cu_changes' )

@@ -1,6 +1,5 @@
 <?php
 
-use MediaWiki\CheckUser\CheckUserLogCommentStore;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\WikiMap\WikiMap;
@@ -104,11 +103,9 @@ class ImportCheckUserLogs extends Maintenance {
 
 		$services = MediaWikiServices::getInstance();
 		$userFactory = $services->getUserFactory();
-		/** @var CheckUserLogCommentStore $checkUserLogCommentStore */
-		$checkUserLogCommentStore = $services->get( 'CheckUserLogCommentStore' );
+		$commentStore = $services->getCommentStore();
 		/** @var CheckUserLogService $checkUserLogService */
 		$checkUserLogService = $services->get( 'CheckUserLogService' );
-		$culReasonMigrationStage = $services->getMainConfig()->get( 'CheckUserLogReasonMigrationStage' );
 
 		while ( !feof( $file ) ) {
 			$line = fgets( $file );
@@ -147,13 +144,11 @@ class ImportCheckUserLogs extends Maintenance {
 						'cul_range_start' => $start,
 						'cul_range_end' => $end
 					];
-					$fields += $checkUserLogCommentStore->insert( $dbw, 'cul_reason', $data['reason'] );
-					if ( $culReasonMigrationStage & SCHEMA_COMPAT_WRITE_NEW ) {
-						$fields += $checkUserLogCommentStore->insert(
-							$dbw, 'cul_reason_plaintext',
-							$checkUserLogService->getPlaintextReason( $data['reason'] )
-						);
-					}
+					$fields += $commentStore->insert( $dbw, 'cul_reason', $data['reason'] );
+					$fields += $commentStore->insert(
+						$dbw, 'cul_reason_plaintext',
+						$checkUserLogService->getPlaintextReason( $data['reason'] )
+					);
 					$dbw->newInsertQueryBuilder()
 						->table( 'cu_log' )
 						->row( $fields )

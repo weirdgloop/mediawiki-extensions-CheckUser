@@ -87,14 +87,6 @@
 			"value": 86400,
 			"description": "Number of seconds for which the temporary account API response is fresh"
 		},
-		"CheckUserCommentMigrationStage": {
-			"value": 259,
-			"description": "A flag used to represent the stage of the migration to the comment table. Default is to write to new and old, and read from old."
-		},
-		"CheckUserLogReasonMigrationStage": {
-			"value": 259,
-			"description": "A flag used to represent the stage of the migration to the comment table. Default is to write to new and old, and read from old."
-		},
 		"CheckUserEventTablesMigrationStage": {
 			"value": 259,
 			"description": "A flag used as the migration stage to the new cu_private_event and cu_log_event tables. Currently set to SCHEMA_COMPAT_OLD | SCHEMA_COMPAT_WRITE_NEW which evaluates to the integer 259."
@@ -180,13 +172,14 @@
 				"UserIdentityLookup",
 				"RevisionLookup",
 				"ArchivedRevisionLookup",
-				"CheckUserLogService"
+				"CheckUserLogService",
+				"CommentStore"
 			]
 		},
 		"checkuserlog": {
 			"class": "MediaWiki\\CheckUser\\Api\\ApiQueryCheckUserLog",
 			"services": [
-				"CheckUserLogCommentStore",
+				"CommentStore",
 				"CheckUserLogService",
 				"UserFactory"
 			]
@@ -523,6 +516,7 @@
 				"UserNameUtils",
 				"CheckUserHookRunner",
 				"CheckUserUtilityService",
+				"CommentStore",
 				"UserAgentClientHintsLookup",
 				"UserAgentClientHintsFormatter"
 			]
@@ -532,7 +526,7 @@
 			"services": [
 				"LinkBatchFactory",
 				"PermissionManager",
-				"CheckUserLogCommentStore",
+				"CommentStore",
 				"CommentFormatter",
 				"CheckUserLogService",
 				"UserFactory",
