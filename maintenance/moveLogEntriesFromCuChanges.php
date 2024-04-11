@@ -95,8 +95,8 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 			"Moving log entries from cu_changes to cu_private_event with cuc_id from $start to $end.\n"
 		);
 
-		$commentMigrationStage = $this->getServiceContainer()->getMainConfig()->get( 'CheckUserCommentMigrationStage' );
-		$commentStore = $this->getServiceContainer()->getCommentStore();
+		$commentMigrationStage = $services->getMainConfig()->get( 'CheckUserCommentMigrationStage' );
+		$commentStore = $services->getCommentStore();
 
 		while ( $blockStart <= $end ) {
 			$this->output( "...checking and moving log entries with cuc_id from $blockStart to $blockEnd\n" );
