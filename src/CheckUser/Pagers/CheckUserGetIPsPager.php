@@ -69,7 +69,7 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 	/** @inheritDoc */
 	public function formatRow( $row ): string {
 		$lang = $this->getLanguage();
-		$ip = IPUtils::prettifyIP( $row->ip );
+		$ip = $row->ip;
 		$templateParams = [];
 		$templateParams['ipLink'] = $this->getSelfLink( $ip,
 			[

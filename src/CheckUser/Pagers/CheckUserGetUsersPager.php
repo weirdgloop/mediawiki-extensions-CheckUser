@@ -183,13 +183,9 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 	public function formatUserRow( string $user_text ): string {
 		$templateParams = [];
 		$templateParams['canPerformBlocks'] = $this->canPerformBlocks;
-
-		$userIsIP = IPUtils::isIPAddress( $user_text );
-		$formattedUserText = $userIsIP ? IPUtils::prettifyIP( $user_text ) ?? $user_text : $user_text;
-
-		$templateParams['userText'] = $formattedUserText;
+		$templateParams['userText'] = $user_text;
 		// Load user object
-		$user = new UserIdentityValue( $this->userSets['ids'][$user_text], $formattedUserText );
+		$user = new UserIdentityValue( $this->userSets['ids'][$user_text], $user_text );
 		$userNonExistent = !IPUtils::isIPAddress( $user ) && !$user->isRegistered();
 		if ( $userNonExistent ) {
 			$templateParams['userLinkClass'] = 'mw-checkuser-nonexistent-user';
@@ -202,7 +198,8 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 			// don't render parentheses in HTML markup (CSS will provide)
 			false
 		);
-		if ( $userIsIP ) {
+		$ip = IPUtils::isIPAddress( $user ) ? $user : '';
+		if ( $ip ) {
 			$templateParams['userLinks'] = $this->msg( 'checkuser-userlinks-ip', $user )->parse();
 		} elseif ( !$userNonExistent ) {
 			if ( $this->msg( 'checkuser-userlinks' )->exists() ) {
@@ -213,7 +210,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		// Add global user tools links
 		// Add CentralAuth link for real registered users
 		if ( $this->centralAuthToollink !== false
-			&& !$userIsIP
+			&& !IPUtils::isIPAddress( $user_text )
 			&& !$userNonExistent
 		) {
 			// Get CentralAuth SpecialPage name in UserLang from the first Alias name
@@ -302,7 +299,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		// Total edit count
 		$templateParams['editCount'] = $this->userSets['edits'][$user_text];
 		// Check if this user or IP is blocked. If so, give a link to the block log...
-		$templateParams['flags'] = $this->userBlockFlags( $userIsIP ? $user : '', $user );
+		$templateParams['flags'] = $this->userBlockFlags( $ip, $user );
 		// List out each IP/XFF combo for this username
 		$templateParams['infoSets'] = [];
 		for ( $i = ( count( $this->userSets['infosets'][$user_text] ) - 1 ); $i >= 0; $i-- ) {
@@ -399,11 +396,9 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 			}
 			$this->userSets['edits'][$row->user_text]++;
 			$this->userSets['first'][$row->user_text] = $row->timestamp;
-			// Prettify IP
-			$formattedIP = IPUtils::prettifyIP( $row->ip ) ?? $row->ip;
 			// Treat blank or NULL xffs as empty strings
 			$xff = empty( $row->xff ) ? null : $row->xff;
-			$xff_ip_combo = [ $formattedIP, $xff ];
+			$xff_ip_combo = [ $row->ip, $xff ];
 			// Add this IP/XFF combo for this username if it's not already there
 			if ( !in_array( $xff_ip_combo, $this->userSets['infosets'][$row->user_text] ) ) {
 				$this->userSets['infosets'][$row->user_text][] = $xff_ip_combo;
