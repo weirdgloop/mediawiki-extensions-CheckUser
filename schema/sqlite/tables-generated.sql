@@ -7,7 +7,6 @@ CREATE TABLE /*_*/cu_changes (
   cuc_namespace INTEGER DEFAULT 0 NOT NULL,
   cuc_title BLOB DEFAULT '' NOT NULL,
   cuc_actor BIGINT UNSIGNED NOT NULL,
-  cuc_actiontext BLOB DEFAULT '' NOT NULL,
   cuc_comment_id BIGINT UNSIGNED NOT NULL,
   cuc_minor SMALLINT DEFAULT 0 NOT NULL,
   cuc_page_id INTEGER UNSIGNED DEFAULT 0 NOT NULL,
@@ -20,8 +19,7 @@ CREATE TABLE /*_*/cu_changes (
   cuc_xff BLOB DEFAULT '',
   cuc_xff_hex VARCHAR(255) DEFAULT NULL,
   cuc_agent BLOB DEFAULT NULL,
-  cuc_private BLOB DEFAULT NULL,
-  cuc_only_for_read_old SMALLINT DEFAULT 0 NOT NULL
+  cuc_agent_id BIGINT UNSIGNED DEFAULT 0 NOT NULL
 );
 
 CREATE INDEX cuc_ip_hex_time ON /*_*/cu_changes (cuc_ip_hex, cuc_timestamp);
@@ -42,7 +40,8 @@ CREATE TABLE /*_*/cu_log_event (
   cule_ip_hex VARCHAR(255) DEFAULT NULL,
   cule_xff BLOB DEFAULT '',
   cule_xff_hex VARCHAR(255) DEFAULT NULL,
-  cule_agent BLOB DEFAULT NULL
+  cule_agent BLOB DEFAULT NULL,
+  cule_agent_id BIGINT UNSIGNED DEFAULT 0 NOT NULL
 );
 
 CREATE INDEX cule_ip_hex_time ON /*_*/cu_log_event (cule_ip_hex, cule_timestamp);
@@ -60,7 +59,7 @@ CREATE TABLE /*_*/cu_private_event (
   cupe_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
   cupe_namespace INTEGER DEFAULT 0 NOT NULL,
   cupe_title BLOB DEFAULT '' NOT NULL,
-  cupe_actor BIGINT UNSIGNED DEFAULT 0 NOT NULL,
+  cupe_actor BIGINT UNSIGNED DEFAULT 0,
   cupe_log_type BLOB DEFAULT '' NOT NULL,
   cupe_log_action BLOB DEFAULT '' NOT NULL,
   cupe_params BLOB NOT NULL,
@@ -72,6 +71,7 @@ CREATE TABLE /*_*/cu_private_event (
   cupe_xff BLOB DEFAULT '',
   cupe_xff_hex VARCHAR(255) DEFAULT NULL,
   cupe_agent BLOB DEFAULT NULL,
+  cupe_agent_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   cupe_private BLOB DEFAULT NULL
 );
 
@@ -84,6 +84,14 @@ CREATE INDEX cupe_timestamp ON /*_*/cu_private_event (cupe_timestamp);
 CREATE INDEX cupe_actor_ip_time ON /*_*/cu_private_event (
   cupe_actor, cupe_ip, cupe_timestamp
 );
+
+
+CREATE TABLE /*_*/cu_useragent (
+  cuua_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+  cuua_text BLOB NOT NULL
+);
+
+CREATE INDEX cuua_text ON /*_*/cu_useragent (cuua_text);
 
 
 CREATE TABLE /*_*/cu_useragent_clienthints (
@@ -113,6 +121,8 @@ CREATE TABLE /*_*/cu_log (
   cul_timestamp BLOB NOT NULL, cul_actor BIGINT UNSIGNED NOT NULL,
   cul_reason_id BIGINT UNSIGNED NOT NULL,
   cul_reason_plaintext_id BIGINT UNSIGNED NOT NULL,
+  cul_result_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
+  cul_result_plaintext_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   cul_type BLOB NOT NULL, cul_target_id INTEGER UNSIGNED DEFAULT 0 NOT NULL,
   cul_target_text BLOB NOT NULL, cul_target_hex BLOB DEFAULT '' NOT NULL,
   cul_range_start BLOB DEFAULT '' NOT NULL,

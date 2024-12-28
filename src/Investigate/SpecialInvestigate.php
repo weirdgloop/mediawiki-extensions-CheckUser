@@ -2,10 +2,6 @@
 
 namespace MediaWiki\CheckUser\Investigate;
 
-use FormSpecialPage;
-use Html;
-use HTMLForm;
-use Language;
 use MediaWiki\CheckUser\GuidedTour\TourLauncher;
 use MediaWiki\CheckUser\Hook\CheckUserSubtitleLinksHook;
 use MediaWiki\CheckUser\HookHandler\Preferences;
@@ -18,12 +14,19 @@ use MediaWiki\CheckUser\Investigate\Utilities\DurationManager;
 use MediaWiki\CheckUser\Investigate\Utilities\EventLogger;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
+use MediaWiki\Html\Html;
+use MediaWiki\HTMLForm\HTMLForm;
+use MediaWiki\Language\Language;
 use MediaWiki\Linker\LinkRenderer;
+use MediaWiki\Message\Message;
+use MediaWiki\Parser\ParserOutput;
 use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\SpecialPage\FormSpecialPage;
+use MediaWiki\Status\Status;
+use MediaWiki\User\Options\UserOptionsManager;
 use MediaWiki\User\UserFactory;
 use MediaWiki\User\UserIdentityLookup;
-use MediaWiki\User\UserOptionsManager;
-use Message;
+use MediaWiki\Utils\UrlUtils;
 use OOUI\ButtonGroupWidget;
 use OOUI\ButtonWidget;
 use OOUI\Element;
@@ -36,8 +39,6 @@ use OOUI\MessageWidget;
 use OOUI\TabOptionWidget;
 use OOUI\Tag;
 use OOUI\Widget;
-use ParserOutput;
-use Status;
 use Wikimedia\IPUtils;
 
 class SpecialInvestigate extends FormSpecialPage {
@@ -55,6 +56,7 @@ class SpecialInvestigate extends FormSpecialPage {
 	private CheckUserLogService $checkUserLogService;
 	private UserIdentityLookup $userIdentityLookup;
 	private UserFactory $userFactory;
+	private UrlUtils $urlUtils;
 
 	/** @var IndexLayout|null */
 	private $layout;
@@ -72,16 +74,10 @@ class SpecialInvestigate extends FormSpecialPage {
 	private const MAX_TARGETS = 10;
 
 	/** @var string */
-	private const TOUR_INVESTIGATE = 'checkuserinvestigate';
+	public const TOUR_INVESTIGATE = 'checkuserinvestigate';
 
 	/** @var string */
-	private const TOUR_INVESTIGATE_FORM = 'checkuserinvestigateform';
-
-	/** @var string[] */
-	private const TOURS = [
-		self::TOUR_INVESTIGATE,
-		self::TOUR_INVESTIGATE_FORM,
-	];
+	public const TOUR_INVESTIGATE_FORM = 'checkuserinvestigateform';
 
 	/**
 	 * @param LinkRenderer $linkRenderer
@@ -99,6 +95,7 @@ class SpecialInvestigate extends FormSpecialPage {
 	 * @param CheckUserLogService $checkUserLogService
 	 * @param UserIdentityLookup $userIdentityLookup
 	 * @param UserFactory $userFactory
+	 * @param UrlUtils $urlUtils
 	 */
 	public function __construct(
 		LinkRenderer $linkRenderer,
@@ -115,7 +112,8 @@ class SpecialInvestigate extends FormSpecialPage {
 		PermissionManager $permissionManager,
 		CheckUserLogService $checkUserLogService,
 		UserIdentityLookup $userIdentityLookup,
-		UserFactory $userFactory
+		UserFactory $userFactory,
+		UrlUtils $urlUtils
 	) {
 		parent::__construct( 'Investigate', 'checkuser' );
 		$this->setLinkRenderer( $linkRenderer );
@@ -133,6 +131,7 @@ class SpecialInvestigate extends FormSpecialPage {
 		$this->checkUserLogService = $checkUserLogService;
 		$this->userIdentityLookup = $userIdentityLookup;
 		$this->userFactory = $userFactory;
+		$this->urlUtils = $urlUtils;
 	}
 
 	/**
@@ -164,11 +163,6 @@ class SpecialInvestigate extends FormSpecialPage {
 			return;
 		}
 
-		// The tour is being explicitly launched by the user, reset their preferences.
-		if ( $this->reLaunchTour() ) {
-			return;
-		}
-
 		$this->getOutput()->addModules( [ 'ext.checkUser' ] );
 
 		// Show the tabs if there is any request data.
@@ -194,7 +188,7 @@ class SpecialInvestigate extends FormSpecialPage {
 		// Add the links after any previous HTML has been cleared.
 		$this->addSubtitle();
 		$this->addHelpLink(
-			'https://meta.wikimedia.org/wiki/Special:MyLanguage/Help:Special_Investigate',
+			'https://www.mediawiki.org/wiki/Special:MyLanguage/Help:Special_Investigate',
 			true
 		);
 	}
@@ -478,6 +472,10 @@ class SpecialInvestigate extends FormSpecialPage {
 	 * @return Message
 	 */
 	private function getTabMessage( string $tab ): Message {
+		// The following messages are generated here:
+		// * checkuser-investigate-tab-preliminary-check
+		// * checkuser-investigate-tab-compare
+		// * checkuser-investigate-tab-timeline
 		return $this->msg( 'checkuser-investigate-tab-' . $tab );
 	}
 
@@ -536,19 +534,30 @@ class SpecialInvestigate extends FormSpecialPage {
 				]
 			);
 			if ( $userCanBlock ) {
-				$blockButton = new ButtonWidget( [
+				$blockAccountsButton = new ButtonWidget( [
 					'infusable' => true,
-					'label' => $this->msg( 'checkuser-investigate-subtitle-block-button-label' )->text(),
+					'label' => $this->msg( 'checkuser-investigate-subtitle-block-accounts-button-label' )->text(),
 					'flags' => [ 'primary', 'progressive' ],
 					'classes' => [
 						'ext-checkuser-investigate-subtitle-block-button',
+						'ext-checkuser-investigate-subtitle-block-accounts-button',
+					],
+				] );
+				$blockIpsButton = new ButtonWidget( [
+					'infusable' => true,
+					'label' => $this->msg( 'checkuser-investigate-subtitle-block-ips-button-label' )->text(),
+					'flags' => [ 'primary', 'progressive' ],
+					'classes' => [
+						'ext-checkuser-investigate-subtitle-block-button',
+						'ext-checkuser-investigate-subtitle-block-ips-button',
 					],
 				] );
 				$items[] = new FieldLayout(
 					new Widget( [
 						'content' => new HorizontalLayout( [
 							'items' => [
-								$blockButton,
+								$blockAccountsButton,
+								$blockIpsButton,
 							]
 						] )
 					] ),
@@ -582,7 +591,7 @@ class SpecialInvestigate extends FormSpecialPage {
 		$canViewLogs = $this->permissionManager->userHasRight( $this->getUser(), 'checkuser-log' );
 		$buttons = [];
 		if ( $canViewLogs ) {
-			 $buttons[] = new ButtonWidget( [
+			$buttons[] = new ButtonWidget( [
 				'label' => $this->msg( 'checkuser-investigate-indicator-logs' )->text(),
 				'href' => self::getTitleFor( 'CheckUserLog' )->getLinkURL(),
 				'target' => $onSubpage ? '_blank' : '',
@@ -869,13 +878,13 @@ class SpecialInvestigate extends FormSpecialPage {
 	 * @return string
 	 */
 	private function getRedirectUrl( array $update ): string {
-		$parts = wfParseURL( $this->getRequest()->getFullRequestURL() );
+		$parts = $this->urlUtils->parse( $this->getRequest()->getFullRequestURL() ) ?? [];
 		$query = wfCgiToArray( $parts['query'] ?? '' );
 		$data = array_filter( array_merge( $query, $update ), static function ( $value ) {
 			return $value !== null;
 		} );
 		$parts['query'] = wfArrayToCgi( $data );
-		return wfAssembleUrl( $parts );
+		return UrlUtils::assemble( $parts );
 	}
 
 	/**
@@ -918,56 +927,6 @@ class SpecialInvestigate extends FormSpecialPage {
 	 */
 	private function getDuration(): string {
 		return $this->durationManager->getFromRequest( $this->getRequest() );
-	}
-
-	/**
-	 * Relaunch Tour Intercept
-	 *
-	 * Intercepts a request and relaunches the tour by updating the user preferences and setting
-	 * a redirect.
-	 *
-	 * @return bool If the tour is being relaunched and a redirect was set.
-	 */
-	public function reLaunchTour(): bool {
-		if ( $this->getRequest()->getMethod() !== 'GET' ) {
-			return false;
-		}
-
-		if ( !in_array( $this->getRequest()->getVal( 'tour' ), self::TOURS, true ) ) {
-			return false;
-		}
-
-		$user = $this->getUser();
-
-		$options = [];
-		switch ( $this->getRequest()->getVal( 'tour' ) ) {
-			case self::TOUR_INVESTIGATE_FORM:
-				$options = [
-					Preferences::INVESTIGATE_FORM_TOUR_SEEN,
-					Preferences::INVESTIGATE_TOUR_SEEN,
-				];
-				break;
-			case self::TOUR_INVESTIGATE:
-				$options = [
-					Preferences::INVESTIGATE_TOUR_SEEN,
-				];
-				break;
-		}
-
-		foreach ( $options as $option ) {
-			$this->userOptionsManager->setOption( $user, $option, null );
-		}
-
-		$this->userOptionsManager->saveOptions( $user );
-
-		$parts = wfParseUrl( $this->getRequest()->getFullRequestURL() );
-		$query = wfCgiToArray( $parts['query'] ?? '' );
-		$query['tour'] = null;
-		$parts['query'] = wfArrayToCgi( $query );
-
-		$this->getOutput()->redirect( wfAssembleUrl( $parts ) );
-
-		return true;
 	}
 
 	/**

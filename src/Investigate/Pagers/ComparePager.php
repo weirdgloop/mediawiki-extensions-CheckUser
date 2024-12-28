@@ -23,15 +23,15 @@
 namespace MediaWiki\CheckUser\Investigate\Pagers;
 
 use DateTime;
-use Html;
-use IContextSource;
-use Linker;
 use MediaWiki\CheckUser\Investigate\Services\CompareService;
 use MediaWiki\CheckUser\Investigate\Utilities\DurationManager;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
+use MediaWiki\Context\IContextSource;
+use MediaWiki\Html\Html;
+use MediaWiki\Linker\Linker;
 use MediaWiki\Linker\LinkRenderer;
+use MediaWiki\Pager\TablePager;
 use MediaWiki\User\UserFactory;
-use TablePager;
 use Wikimedia\IPUtils;
 use Wikimedia\Rdbms\FakeResultWrapper;
 
@@ -44,12 +44,12 @@ class ComparePager extends TablePager {
 	private $fieldNames;
 
 	/**
-	 * Holds a cache of iphex => edit-count to avoid
+	 * Holds a cache of iphex => action-count to avoid
 	 * recurring queries to the database for the same ip
 	 *
 	 * @var array
 	 */
-	private $ipTotalEdits;
+	private $ipTotalActions;
 
 	/**
 	 * Targets whose results should not be included in the investigation.
@@ -124,37 +124,34 @@ class ComparePager extends TablePager {
 	 */
 	public function getCellAttrs( $field, $value ) {
 		$attributes = parent::getCellAttrs( $field, $value );
-		$attributes['class'] = $attributes['class'] ?? '';
+		$attributes['class'] ??= '';
 
 		$row = $this->mCurrentRow;
 		switch ( $field ) {
-			case 'cuc_ip':
+			case 'ip':
 				foreach ( $this->filteredTargets as $target ) {
-					if ( !IPUtils::isIPAddress( $target ) ) {
-						continue;
-					}
-
-					if ( IPUtils::isValidRange( $target ) && IPUtils::isInRange( $value, $target ) ) {
-						$attributes['class'] .= ' ext-checkuser-compare-table-cell-target';
-						break;
-					}
-
-					if ( IPUtils::toHex( $target ) === $row->cuc_ip_hex ) {
+					if ( IPUtils::isIPAddress( $target ) && IPUtils::isInRange( $value, $target ) ) {
+						// If the current cuc_ip is either in the range of a filtered target or is the filtered target,
+						// then mark the cell as a target.
 						$attributes['class'] .= ' ext-checkuser-compare-table-cell-target';
 						break;
 					}
 				}
-				$ipHex = IPUtils::toHex( $value );
+				$ipHex = $row->ip_hex;
 				$attributes['class'] .= ' ext-checkuser-investigate-table-cell-interactive';
 				$attributes['class'] .= ' ext-checkuser-investigate-table-cell-pinnable';
 				$attributes['class'] .= ' ext-checkuser-compare-table-cell-ip-target';
 				$attributes['data-field'] = $field;
 				$attributes['data-value'] = $value;
 				$attributes['data-sort-value'] = $ipHex;
-				$attributes['data-edits'] = $row->total_edits;
-				$attributes['data-all-edits'] = $this->ipTotalEdits[$ipHex];
+				$attributes['data-actions'] = $row->total_actions;
+				$attributes['data-all-actions'] = $this->ipTotalActions[$ipHex];
 				break;
-			case 'cuc_user_text':
+			case 'user_text':
+				// Use the IP as the $row->user_text if the actor ID is NULL and the IP is not NULL (T353953).
+				if ( $row->actor === null && $row->ip ) {
+					$value = $row->ip;
+				}
 				// Hide the username if it is hidden from the current authority.
 				$user = $this->userFactory->newFromName( $value );
 				$userIsHidden = $user !== null && $user->isHidden() && !$this->getAuthority()->isAllowed( 'hideuser' );
@@ -176,7 +173,7 @@ class ComparePager extends TablePager {
 				// as the sort value, since UI elements are added to the table cell.
 				$attributes['data-sort-value'] = $value;
 				break;
-			case 'cuc_agent':
+			case 'agent':
 				$attributes['class'] .= ' ext-checkuser-investigate-table-cell-interactive';
 				$attributes['class'] .= ' ext-checkuser-investigate-table-cell-pinnable';
 				$attributes['class'] .= ' ext-checkuser-compare-table-cell-user-agent';
@@ -188,8 +185,8 @@ class ComparePager extends TablePager {
 				break;
 			case 'activity':
 				$attributes['class'] .= ' ext-checkuser-compare-table-cell-activity';
-				$start = new DateTime( $row->first_edit );
-				$end = new DateTime( $row->last_edit );
+				$start = new DateTime( $row->first_action );
+				$end = new DateTime( $row->last_action );
 				$attributes['data-sort-value'] = $start->format( 'Ymd' ) . $end->format( 'Ymd' );
 				break;
 		}
@@ -210,39 +207,44 @@ class ComparePager extends TablePager {
 		$row = $this->mCurrentRow;
 
 		switch ( $name ) {
-			case 'cuc_user_text':
+			case 'user_text':
+				// Use the IP as the $row->user_text if the actor ID is NULL and the IP is not NULL (T353953).
+				if ( $row->actor === null && $row->ip ) {
+					$value = $row->ip;
+				}
+				'@phan-var string $value';
 				// Hide the username if it is hidden from the current authority.
 				$user = $this->userFactory->newFromName( $value );
 				if ( $user !== null && $user->isHidden() && !$this->getAuthority()->isAllowed( 'hideuser' ) ) {
 					return $this->msg( 'rev-deleted-user' )->text();
 				}
 				if ( IPUtils::isValid( $value ) ) {
-					$formatted = $this->msg( 'checkuser-investigate-compare-table-cell-unregistered' );
+					$formatted = $this->msg( 'checkuser-investigate-compare-table-cell-unregistered' )->text();
 				} else {
-					$formatted = Linker::userLink( $row->cuc_user ?? 0, $value );
+					$formatted = Linker::userLink( $row->user ?? 0, $value );
 				}
 				break;
-			case 'cuc_ip':
+			case 'ip':
 				$formatted = Html::rawElement(
 					'span',
 					[ 'class' => "ext-checkuser-compare-table-cell-ip" ],
 					htmlspecialchars( $value )
 				);
 
-				// get other edits
-				$otherEdits = '';
-				$ipHex = $row->cuc_ip_hex;
-				if ( !isset( $this->ipTotalEdits[$ipHex] ) ) {
-					$this->ipTotalEdits[$ipHex] = $this->compareService->getTotalEditsFromIp( $ipHex );
+				// get other actions
+				$otherActions = '';
+				$ipHex = $row->ip_hex;
+				if ( !isset( $this->ipTotalActions[$ipHex] ) ) {
+					$this->ipTotalActions[$ipHex] = $this->compareService->getTotalActionsFromIP( $ipHex );
 				}
 
-				if ( $this->ipTotalEdits[$ipHex] ) {
-					$otherEdits = Html::rawElement(
+				if ( $this->ipTotalActions[$ipHex] ) {
+					$otherActions = Html::rawElement(
 						'span',
 						[],
 						$this->msg(
-							'checkuser-investigate-compare-table-cell-other-edits',
-							$this->ipTotalEdits[$ipHex]
+							'checkuser-investigate-compare-table-cell-other-actions',
+							$this->ipTotalActions[$ipHex]
 						)->parse()
 					);
 				}
@@ -251,19 +253,19 @@ class ComparePager extends TablePager {
 					'div',
 					[],
 					$this->msg(
-						'checkuser-investigate-compare-table-cell-edits',
-						$row->total_edits
-					)->parse() . $otherEdits
+						'checkuser-investigate-compare-table-cell-actions',
+						$row->total_actions
+					)->parse() . ' ' . $otherActions
 				);
 
 				break;
-			case 'cuc_agent':
+			case 'agent':
 				$formatted = htmlspecialchars( $value ?? '' );
 				break;
 			case 'activity':
-				$firstEdit = $language->userDate( $row->first_edit, $this->getUser() );
-				$lastEdit = $language->userDate( $row->last_edit, $this->getUser() );
-				$formatted = htmlspecialchars( $firstEdit . ' - ' . $lastEdit );
+				$firstAction = $language->userDate( $row->first_action, $this->getUser() );
+				$lastAction = $language->userDate( $row->last_action, $this->getUser() );
+				$formatted = htmlspecialchars( $firstAction . ' - ' . $lastAction );
 				break;
 			default:
 				$formatted = '';
@@ -276,7 +278,7 @@ class ComparePager extends TablePager {
 	 * @inheritDoc
 	 */
 	public function getIndexField() {
-		return [ [ 'cuc_user_text', 'cuc_ip_hex', 'cuc_agent' ] ];
+		return [ [ 'user_text', 'ip_hex', 'agent' ] ];
 	}
 
 	/**
@@ -285,9 +287,9 @@ class ComparePager extends TablePager {
 	public function getFieldNames() {
 		if ( $this->fieldNames === null ) {
 			$this->fieldNames = [
-				'cuc_user_text' => 'checkuser-investigate-compare-table-header-username',
-				'cuc_ip' => 'checkuser-investigate-compare-table-header-ip',
-				'cuc_agent' => 'checkuser-investigate-compare-table-header-useragent',
+				'user_text' => 'checkuser-investigate-compare-table-header-username',
+				'ip' => 'checkuser-investigate-compare-table-header-ip',
+				'agent' => 'checkuser-investigate-compare-table-header-useragent',
 				'activity' => 'checkuser-investigate-compare-table-header-activity',
 			];
 			foreach ( $this->fieldNames as &$val ) {

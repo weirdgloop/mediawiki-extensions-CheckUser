@@ -2,16 +2,17 @@
 
 namespace MediaWiki\CheckUser\Investigate\Pagers;
 
-use Html;
-use IContextSource;
 use MediaWiki\CheckUser\Hook\CheckUserFormatRowHook;
 use MediaWiki\CheckUser\Investigate\Services\TimelineService;
 use MediaWiki\CheckUser\Investigate\Utilities\DurationManager;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
+use MediaWiki\Context\IContextSource;
+use MediaWiki\Html\Html;
 use MediaWiki\Linker\LinkRenderer;
-use ParserOutput;
+use MediaWiki\Pager\ReverseChronologicalPager;
+use MediaWiki\Parser\ParserOutput;
 use Psr\Log\LoggerInterface;
-use ReverseChronologicalPager;
+use Wikimedia\Rdbms\FakeResultWrapper;
 
 class TimelinePager extends ReverseChronologicalPager {
 	private CheckUserFormatRowHook $formatRowHookRunner;
@@ -85,12 +86,26 @@ class TimelinePager extends ReverseChronologicalPager {
 
 	/**
 	 * @inheritDoc
+	 *
+	 * Handle special case where all targets are filtered.
+	 */
+	public function reallyDoQuery( $offset, $limit, $order ) {
+		// If there are no targets, there is no need to run the query and an empty result can be used.
+		if ( $this->filteredTargets === [] ) {
+			return new FakeResultWrapper( [] );
+		}
+		return parent::reallyDoQuery( $offset, $limit, $order );
+	}
+
+	/**
+	 * @inheritDoc
 	 */
 	public function getQueryInfo() {
 		return $this->timelineService->getQueryInfo(
 			$this->filteredTargets,
 			$this->excludeTargets,
-			$this->start
+			$this->start,
+			$this->mLimit
 		);
 	}
 
@@ -98,7 +113,7 @@ class TimelinePager extends ReverseChronologicalPager {
 	 * @inheritDoc
 	 */
 	public function getIndexField() {
-		return [ [ 'cuc_timestamp', 'cuc_id' ] ];
+		return [ [ 'timestamp', 'id' ] ];
 	}
 
 	/**
@@ -106,7 +121,7 @@ class TimelinePager extends ReverseChronologicalPager {
 	 */
 	public function formatRow( $row ) {
 		$line = '';
-		$dateHeader = $this->getLanguage()->userDate( wfTimestamp( TS_MW, $row->cuc_timestamp ), $this->getUser() );
+		$dateHeader = $this->getLanguage()->userDate( wfTimestamp( TS_MW, $row->timestamp ), $this->getUser() );
 		if ( $this->lastDateHeader === null ) {
 			$this->lastDateHeader = $dateHeader;
 			$line .= Html::element( 'h4', [], $dateHeader );
@@ -155,13 +170,6 @@ class TimelinePager extends ReverseChronologicalPager {
 		);
 
 		return $line;
-	}
-
-	/**
-	 * @inheritDoc
-	 */
-	public function getEmptyBody() {
-		return Html::rawElement( 'p', [], $this->msg( 'checkuser-investigate-timeline-empty' )->text() );
 	}
 
 	/**

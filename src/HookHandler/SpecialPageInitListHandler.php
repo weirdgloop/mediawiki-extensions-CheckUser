@@ -2,10 +2,10 @@
 
 namespace MediaWiki\CheckUser\HookHandler;
 
-use Config;
-use MediaWiki\CheckUser\Investigate\SpecialInvestigate;
-use MediaWiki\CheckUser\Investigate\SpecialInvestigateBlock;
+use MediaWiki\CheckUser\GlobalContributions\SpecialGlobalContributions;
+use MediaWiki\CheckUser\IPContributions\SpecialIPContributions;
 use MediaWiki\SpecialPage\Hook\SpecialPage_initListHook;
+use MediaWiki\User\TempUser\TempUserConfig;
 
 // The name of onSpecialPage_initList raises the following phpcs error. As the
 // name is defined in core, this is an unavoidable issue and therefore the check
@@ -18,46 +18,46 @@ use MediaWiki\SpecialPage\Hook\SpecialPage_initListHook;
  */
 class SpecialPageInitListHandler implements SpecialPage_initListHook {
 
-	private Config $config;
+	private TempUserConfig $tempUserConfig;
 
-	public function __construct( Config $config ) {
-		$this->config = $config;
+	public function __construct( TempUserConfig $tempUserConfig ) {
+		$this->tempUserConfig = $tempUserConfig;
 	}
 
 	/** @inheritDoc */
 	public function onSpecialPage_initList( &$list ) {
-		if ( $this->config->get( 'CheckUserEnableSpecialInvestigate' ) ) {
-			$list['Investigate'] = [
-				'class' => SpecialInvestigate::class,
+		if ( $this->tempUserConfig->isKnown() ) {
+			$list['IPContributions'] = [
+				'class' => SpecialIPContributions::class,
 				'services' => [
-					'LinkRenderer',
-					'ContentLanguage',
-					'UserOptionsManager',
-					'CheckUserPreliminaryCheckPagerFactory',
-					'CheckUserComparePagerFactory',
-					'CheckUserTimelinePagerFactory',
-					'CheckUserTokenQueryManager',
-					'CheckUserDurationManager',
-					'CheckUserEventLogger',
-					'CheckUserGuidedTourLauncher',
-					'CheckUserHookRunner',
 					'PermissionManager',
-					'CheckUserLogService',
-					'UserIdentityLookup',
+					'ConnectionProvider',
+					'NamespaceInfo',
+					'UserNameUtils',
+					'UserNamePrefixSearch',
+					'UserOptionsLookup',
 					'UserFactory',
+					'UserIdentityLookup',
+					'DatabaseBlockStore',
+					'CheckUserLookupUtils',
+					'CheckUserIPContributionsPagerFactory',
 				],
 			];
-
-			$list['InvestigateBlock'] = [
-				'class' => SpecialInvestigateBlock::class,
+			$list['GlobalContributions'] = [
+				'class' => SpecialGlobalContributions::class,
 				'services' => [
-					'BlockUserFactory',
-					'BlockPermissionCheckerFactory',
-					'PermissionManager',
-					'TitleFormatter',
-					'UserFactory',
-					'CheckUserEventLogger',
-				]
+					"PermissionManager",
+					"ConnectionProvider",
+					"NamespaceInfo",
+					"UserNameUtils",
+					"UserNamePrefixSearch",
+					"UserOptionsLookup",
+					"UserFactory",
+					"UserIdentityLookup",
+					"DatabaseBlockStore",
+					"CheckUserLookupUtils",
+					"CheckUserGlobalContributionsPagerFactory"
+				],
 			];
 		}
 

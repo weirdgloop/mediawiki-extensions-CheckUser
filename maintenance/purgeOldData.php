@@ -2,11 +2,14 @@
 
 namespace MediaWiki\CheckUser\Maintenance;
 
-use Maintenance;
+use MediaWiki\CheckUser\CheckUserQueryInterface;
 use MediaWiki\CheckUser\ClientHints\ClientHintsReferenceIds;
+use MediaWiki\CheckUser\Services\CheckUserCentralIndexManager;
+use MediaWiki\CheckUser\Services\CheckUserDataPurger;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
-use MediaWiki\MediaWikiServices;
-use Wikimedia\Rdbms\SelectQueryBuilder;
+use MediaWiki\MainConfigNames;
+use MediaWiki\Maintenance\Maintenance;
+use PurgeRecentChanges;
 use Wikimedia\Timestamp\ConvertibleTimestamp;
 
 if ( getenv( 'MW_INSTALL_PATH' ) ) {
@@ -27,111 +30,79 @@ class PurgeOldData extends Maintenance {
 
 	public function execute() {
 		$config = $this->getConfig();
-		$CUDMaxAge = $config->get( 'CUDMaxAge' );
-		$RCMaxAge = $config->get( 'RCMaxAge' );
-		$PutIPinRC = $config->get( 'PutIPinRC' );
+		$cudMaxAge = $config->get( 'CUDMaxAge' );
+		$cutoff = $this->getPrimaryDB()->timestamp( ConvertibleTimestamp::time() - $cudMaxAge );
 
-		$this->output( "Purging data from cu_changes..." );
-		[ $count, $mappingRowsCount ] = $this->prune(
-			'cu_changes', 'cuc_timestamp', $CUDMaxAge, UserAgentClientHintsManager::IDENTIFIER_CU_CHANGES
-		);
-		$this->output(
-			"Purged $count rows and $mappingRowsCount client hint mapping rows purged.\n"
-		);
+		// Get an exclusive lock to purge the expired CheckUser data, so that no job attempts to do this while
+		// we are doing it here.
+		$domainId = $this->getPrimaryDB()->getDomainID();
+		$key = CheckUserDataPurger::getPurgeLockKey( $domainId );
+		// Set the timeout at 60s, in case any job that has the lock is slow to run.
+		$scopedLock = $this->getPrimaryDB()->getScopedLockAndFlush( $key, __METHOD__, 60 );
+		if ( $scopedLock ) {
+			// Purge expired rows from each local CheckUser result table
+			foreach ( CheckUserQueryInterface::RESULT_TABLES as $table ) {
+				$this->output( "Purging data from $table..." );
+				[ $count, $mappingRowsCount ] = $this->prune( $table, $cutoff );
+				$this->output( "Purged $count rows and $mappingRowsCount client hint mapping rows.\n" );
+			}
 
-		$this->output( "Purging data from cu_private_event..." );
-		[ $count, $mappingRowsCount ] = $this->prune(
-			'cu_private_event', 'cupe_timestamp', $CUDMaxAge,
-			UserAgentClientHintsManager::IDENTIFIER_CU_PRIVATE_EVENT
-		);
-		$this->output(
-			"Purged $count rows and $mappingRowsCount client hint mapping rows purged.\n"
-		);
+			if ( $this->getConfig()->get( 'CheckUserWriteToCentralIndex' ) ) {
+				// Purge expired rows from the central index tables where the rows are associated with this wiki
+				/** @var CheckUserCentralIndexManager $checkUserCentralIndexManager */
+				$checkUserCentralIndexManager = $this->getServiceContainer()->get( 'CheckUserCentralIndexManager' );
+				$centralRowsPurged = 0;
+				do {
+					$rowsPurgedInThisBatch = $checkUserCentralIndexManager->purgeExpiredRows(
+						$cutoff, $domainId, $this->mBatchSize
+					);
+					$centralRowsPurged += $rowsPurgedInThisBatch;
+					$this->waitForReplication();
+				} while ( $rowsPurgedInThisBatch !== 0 );
+				$this->output( "Purged $centralRowsPurged central index rows.\n" );
+			}
+		} else {
+			$this->error( "Unable to acquire a lock to do the purging of CheckUser data. Skipping this." );
+		}
 
-		$this->output( "Purging data from cu_log_event..." );
-		[ $count, $mappingRowsCount ] = $this->prune(
-			'cu_log_event', 'cule_timestamp', $CUDMaxAge,
-			UserAgentClientHintsManager::IDENTIFIER_CU_LOG_EVENT
-		);
-		$this->output(
-			"Purged $count rows and $mappingRowsCount client hint mapping rows purged.\n"
-		);
+		$userAgentClientHintsManager = $this->getServiceContainer()->get( 'UserAgentClientHintsManager' );
+		$orphanedMappingRowsDeleted = $userAgentClientHintsManager->deleteOrphanedMapRows();
+		$this->output( "Purged $orphanedMappingRowsDeleted orphaned client hint mapping rows.\n" );
 
-		if ( $PutIPinRC ) {
+		if ( $config->get( MainConfigNames::PutIPinRC ) ) {
 			$this->output( "Purging data from recentchanges..." );
-			$count = $this->prune( 'recentchanges', 'rc_timestamp', $RCMaxAge, null );
-			$this->output( "Purged " . $count[0] . " rows.\n" );
+			$purgeRecentChanges = $this->runChild( PurgeRecentChanges::class );
+			$purgeRecentChanges->execute();
 		}
 
 		$this->output( "Done.\n" );
 	}
 
 	/**
-	 * @param string $table
-	 * @param string $ts_column
-	 * @param int $maxAge
-	 * @param int|null $clientHintMappingId The mapping ID associated with this table for cu_useragent_clienthints_map
+	 * Prunes data from the given CheckUser result table
 	 *
+	 * @param string $table
+	 * @param string $cutoff
 	 * @return int[] An array of two integers: The first being the rows deleted in $table and
 	 *  the second in cu_useragent_clienthints_map.
 	 */
-	protected function prune( string $table, string $ts_column, int $maxAge, ?int $clientHintMappingId ) {
-		/** @var UserAgentClientHintsManager $userAgentClientHintsManager */
-		$userAgentClientHintsManager = MediaWikiServices::getInstance()->get( 'UserAgentClientHintsManager' );
-		$referenceColumn = $userAgentClientHintsManager::IDENTIFIER_TO_COLUMN_NAME_MAP[$clientHintMappingId] ?? null;
+	protected function prune( string $table, string $cutoff ) {
+		/** @var CheckUserDataPurger $checkUserDataPurger */
+		$checkUserDataPurger = $this->getServiceContainer()->get( 'CheckUserDataPurger' );
 		$clientHintReferenceIds = new ClientHintsReferenceIds();
-		$shouldDeleteAssociatedClientData = $this->getConfig()->get( 'CheckUserPurgeOldClientHintsData' );
-
-		$dbw = $this->getDB( DB_PRIMARY );
-		$expiredCond = "$ts_column < " . $dbw->addQuotes( $dbw->timestamp( ConvertibleTimestamp::time() - $maxAge ) );
 
 		$deletedCount = 0;
-		while ( true ) {
-			// Get the first $this->mBatchSize (or less) items
-			$queryBuilder = $dbw->newSelectQueryBuilder()
-				->table( $table )
-				->conds( $expiredCond )
-				->orderBy( $ts_column, SelectQueryBuilder::SORT_ASC )
-				->limit( $this->mBatchSize )
-				->caller( __METHOD__ );
-			if ( $shouldDeleteAssociatedClientData && $clientHintMappingId !== null ) {
-				$res = $queryBuilder->fields( [
-					$ts_column,
-					$referenceColumn
-				] )->fetchResultSet();
-				foreach ( $res as $row ) {
-					$clientHintReferenceIds->addReferenceIds( $row->$referenceColumn, $clientHintMappingId );
-				}
-				$res->seek( 0 );
-			} else {
-				$res = $queryBuilder->field( $ts_column )->fetchResultSet();
-			}
-			if ( !$res->numRows() ) {
-				// all cleared
-				break;
-			}
-			// Record the start and end timestamp for the set
-			$blockStart = $dbw->addQuotes( $res->fetchRow()[$ts_column] );
-			$res->seek( $res->numRows() - 1 );
-			$blockEnd = $dbw->addQuotes( $res->fetchRow()[$ts_column] );
-			$res->free();
+		do {
+			$rowsPurgedInThisBatch = $checkUserDataPurger->purgeDataFromLocalTable(
+				$this->getPrimaryDB(), $table, $cutoff, $clientHintReferenceIds, __METHOD__, $this->mBatchSize
+			);
+			$deletedCount += $rowsPurgedInThisBatch;
+			$this->waitForReplication();
+		} while ( $rowsPurgedInThisBatch !== 0 );
 
-			// Do the actual delete...
-			$this->beginTransaction( $dbw, __METHOD__ );
-			$dbw->newDeleteQueryBuilder()
-				->table( $table )
-				->where( "$ts_column BETWEEN $blockStart AND $blockEnd" )
-				->caller( __METHOD__ )
-				->execute();
-			$deletedCount += $dbw->affectedRows();
-			$this->commitTransaction( $dbw, __METHOD__ );
-		}
-
-		$mappingRowsDeleted = 0;
-		if ( $shouldDeleteAssociatedClientData ) {
-			$mappingRowsDeleted = $userAgentClientHintsManager->deleteMappingRows( $clientHintReferenceIds );
-			$mappingRowsDeleted += $userAgentClientHintsManager->deleteOrphanedMapRows();
-		}
+		/** @var UserAgentClientHintsManager $userAgentClientHintsManager */
+		$userAgentClientHintsManager = $this->getServiceContainer()->get( 'UserAgentClientHintsManager' );
+		$mappingRowsDeleted = $userAgentClientHintsManager->deleteMappingRows( $clientHintReferenceIds );
 
 		return [ $deletedCount, $mappingRowsDeleted ];
 	}

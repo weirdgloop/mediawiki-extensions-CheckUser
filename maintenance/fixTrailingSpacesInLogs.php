@@ -2,8 +2,7 @@
 
 namespace MediaWiki\CheckUser\Maintenance;
 
-use LoggedUpdateMaintenance;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Maintenance\LoggedUpdateMaintenance;
 
 $IP = getenv( 'MW_INSTALL_PATH' );
 if ( $IP === false ) {
@@ -13,8 +12,6 @@ require_once "$IP/maintenance/Maintenance.php";
 
 /**
  * Maintenance script for fixing trailing spaces issue in cu_log (see T275704)
- *
- * @codeCoverageIgnore No need to cover, single-use script.
  */
 class FixTrailingSpacesInLogs extends LoggedUpdateMaintenance {
 
@@ -35,31 +32,36 @@ class FixTrailingSpacesInLogs extends LoggedUpdateMaintenance {
 	 * @inheritDoc
 	 */
 	protected function doDBUpdates() {
-		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
-		$dbr = $lbFactory->getReplicaDatabase( false, 'vslow' );
-		$dbw = $lbFactory->getPrimaryDatabase();
+		$dbr = $this->getReplicaDB();
+		$dbw = $this->getPrimaryDB();
 		$batchSize = $this->getBatchSize();
+
+		$this->output( "Removing trailing spaces from cu_log entries...\n" );
 
 		$maxId = $dbr->newSelectQueryBuilder()
 			->field( 'MAX(cul_id)' )
 			->table( 'cu_log' )
 			->caller( __METHOD__ )
 			->fetchField();
+
+		if ( !$maxId ) {
+			$this->output( "cu_log is empty; nothing to process.\n" );
+			return true;
+		}
+
 		$prevId = 0;
 		$curId = $batchSize;
 		do {
-			$dbw->update(
-				'cu_log',
-				[
-					"cul_target_text = TRIM(cul_target_text)"
-				],
-				[
-					"cul_id > $prevId",
-					"cul_id <= $curId"
-				],
-				__METHOD__
-			);
-			$lbFactory->waitForReplication();
+			$dbw->newUpdateQueryBuilder()
+				->update( 'cu_log' )
+				->set( [ 'cul_target_text = TRIM(cul_target_text)' ] )
+				->where( [
+					$dbw->expr( 'cul_id', '>', $prevId ),
+					$dbw->expr( 'cul_id', '<=', $curId )
+				] )
+				->caller( __METHOD__ )
+				->execute();
+			$this->waitForReplication();
 
 			$this->output( "Processed $batchSize rows out of $maxId.\n" );
 			$prevId = $curId;

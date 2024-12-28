@@ -19,7 +19,6 @@
 	"checkuser-query": "Ҷустуҷӯи тағйироти охир",
 	"checkuser-target": "Корбар ё нишонаи IP",
 	"checkuser-users": "Феҳрист кардани корбарон",
-	"checkuser-edits": "Намоиши вироишҳои марбут ба ин нишонаи IP",
 	"checkuser-ips": "Феҳрист кардани нишонаҳои IP",
 	"checkuser-period": "Тӯл:",
 	"checkuser-week-1": "ҳафта гузашта",
@@ -35,14 +34,9 @@
 	"checkuser-wasblocked": "Қаблан баста шуда",
 	"checkuser-localonly": "Якка нашуда",
 	"checkuser-massblock": "Корбарони интихобшуда баста шаванд",
-	"checkuser-blocktag": "Ҷойгузин кардани саҳифаҳои корбарон бо:",
-	"checkuser-blocktag-talk": "Ҷойгузин кардани саҳифаҳои баҳс бо:",
-	"checkuser-block-limit": "Теъдоди беш аз шумораи корбарон интихоб шудаанд.",
 	"checkuser-search": "Ҷустуҷӯ",
 	"checkuser-search-submit": "Ҷустуҷӯ",
 	"checkuser-showmain": "Бозгашт ба форми аслии бозрасии корбар",
-	"checkuser-autocreate-action": "ба таври худкор эҷод шуда буд",
-	"checkuser-email-action": "почтаи электронӣ ба корбар \"$1\" фиристода шуд",
 	"logentry-checkuser-private-event-autocreate-account": "ба таври худкор эҷод шуда буд",
 	"checkuser-investigate-reason-label": "Сабаб"
 }

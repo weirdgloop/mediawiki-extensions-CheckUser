@@ -2,20 +2,18 @@
 
 namespace MediaWiki\CheckUser\CheckUser\Pagers;
 
-use Html;
-use IContextSource;
-use Linker;
 use MediaWiki\Cache\LinkBatchFactory;
-use MediaWiki\CheckUser\CheckUser\SpecialCheckUserLog;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
 use MediaWiki\CommentFormatter\CommentFormatter;
 use MediaWiki\CommentStore\CommentStore;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Context\IContextSource;
+use MediaWiki\Html\Html;
+use MediaWiki\Linker\Linker;
+use MediaWiki\Pager\RangeChronologicalPager;
+use MediaWiki\SpecialPage\SpecialPage;
 use MediaWiki\User\ActorStore;
 use MediaWiki\User\UserFactory;
 use MediaWiki\User\UserIdentityValue;
-use RangeChronologicalPager;
-use SpecialPage;
 use Wikimedia\IPUtils;
 use Wikimedia\Rdbms\IResultWrapper;
 
@@ -73,6 +71,10 @@ class CheckUserLogPager extends RangeChronologicalPager {
 			$endTimestamp = $opts['end'] . ' 23:59:59';
 		}
 		$this->getDateRangeCond( $startTimestamp, $endTimestamp );
+
+		// T373858: Limit the number of results to 500 (the maximum shown limit) due to the page being slow to load.
+		// TODO: Remove this once improvements to the page loading speed have been made.
+		$this->mLimit = min( 500, $this->mLimit );
 	}
 
 	/**
@@ -106,7 +108,10 @@ class CheckUserLogPager extends RangeChronologicalPager {
 					'class' => $dateAndTimeClasses,
 				],
 				[
-					'offset' => $row->cul_timestamp + 3600,
+					// offset is used by IndexPager, it does not know this is a timestamp,
+					// so provide in database format to make it working as string there.
+					'offset' => $this->getDatabase()->timestamp(
+						(int)wfTimestamp( TS_UNIX, $row->cul_timestamp ) + 3600 ),
 					'highlight' => $row->cul_timestamp,
 				]
 			);
@@ -191,11 +196,20 @@ class CheckUserLogPager extends RangeChronologicalPager {
 
 		$lang = $this->getLanguage();
 		$contextUser = $this->getUser();
-		// Give grep a chance to find the usages:
-		// checkuser-log-entry-userips, checkuser-log-entry-ipedits,
-		// checkuser-log-entry-ipusers, checkuser-log-entry-ipedits-xff
-		// checkuser-log-entry-ipusers-xff, checkuser-log-entry-useredits
-		$rowContent = $this->msg( 'checkuser-log-entry-' . $row->cul_type )
+		// The following messages are generated here:
+		// * checkuser-log-entry-userips
+		// * checkuser-log-entry-ipactions
+		// * checkuser-log-entry-ipusers
+		// * checkuser-log-entry-ipactions-xff
+		// * checkuser-log-entry-ipusers-xff
+		// * checkuser-log-entry-useractions
+		// * checkuser-log-entry-investigate
+		$cul_type = [
+			'ipedits' => 'ipactions',
+			'ipedits-xff' => 'ipactions-xff',
+			'useredits' => 'useractions'
+		][$row->cul_type] ?? $row->cul_type;
+		$rowContent = $this->msg( 'checkuser-log-entry-' . $cul_type )
 			->rawParams(
 				$user,
 				$target,
@@ -271,7 +285,7 @@ class CheckUserLogPager extends RangeChronologicalPager {
 		if ( $this->opts['target'] !== '' ) {
 			$queryInfo['conds'] = array_merge(
 				$queryInfo['conds'],
-				$this->getTargetSearchConds( $this->opts['target'] ) ?? []
+				$this->checkUserLogService->getTargetSearchConds( $this->opts['target'] ) ?? []
 			);
 			if ( IPUtils::isIPAddress( $this->opts['target'] ) ) {
 				// Use the cul_target_hex index on the query if the target is an IP
@@ -352,40 +366,6 @@ class CheckUserLogPager extends RangeChronologicalPager {
 		$initiatorId = $this->actorStore->findActorIdByName( $initiator, $this->mDb ) ?? false;
 		if ( $initiatorId !== false ) {
 			return [ 'cul_actor' => $initiatorId ];
-		}
-		return null;
-	}
-
-	/**
-	 * Get DB search conditions according to the CU target given.
-	 *
-	 * @param string $target the username, IP address or range of the target.
-	 * @return array|null array if valid target, null if invalid target given
-	 */
-	public static function getTargetSearchConds( string $target ): ?array {
-		$dbr = MediaWikiServices::getInstance()->getDBLoadBalancerFactory()->getReplicaDatabase();
-		$result = SpecialCheckUserLog::verifyTarget( $target );
-		if ( is_array( $result ) ) {
-			switch ( count( $result ) ) {
-				case 1:
-					return [
-						'cul_target_hex = ' . $dbr->addQuotes( $result[0] ) . ' OR ' .
-						'(cul_range_end >= ' . $dbr->addQuotes( $result[0] ) . ' AND ' .
-						'cul_range_start <= ' . $dbr->addQuotes( $result[0] ) . ')'
-					];
-				case 2:
-					return [
-						'(cul_target_hex >= ' . $dbr->addQuotes( $result[0] ) . ' AND ' .
-						'cul_target_hex <= ' . $dbr->addQuotes( $result[1] ) . ') OR ' .
-						'(cul_range_end >= ' . $dbr->addQuotes( $result[0] ) . ' AND ' .
-						'cul_range_start <= ' . $dbr->addQuotes( $result[1] ) . ')'
-					];
-			}
-		} elseif ( is_int( $result ) ) {
-			return [
-				'cul_type' => [ 'userips', 'useredits', 'investigate' ],
-				'cul_target_id' => $result,
-			];
 		}
 		return null;
 	}

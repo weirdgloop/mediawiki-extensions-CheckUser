@@ -2,25 +2,26 @@
 
 namespace MediaWiki\CheckUser\CheckUser\Pagers;
 
-use ActorMigration;
-use CentralIdLookup;
-use ExtensionRegistry;
-use IContextSource;
 use LogicException;
 use MediaWiki\Block\DatabaseBlock;
 use MediaWiki\CheckUser\CheckUser\SpecialCheckUser;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
+use MediaWiki\CheckUser\Services\CheckUserLookupUtils;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
+use MediaWiki\Context\IContextSource;
 use MediaWiki\Extension\TorBlock\TorExitNodes;
 use MediaWiki\Html\FormOptions;
 use MediaWiki\Html\Html;
 use MediaWiki\Linker\LinkRenderer;
+use MediaWiki\Registration\ExtensionRegistry;
+use MediaWiki\SpecialPage\SpecialPage;
 use MediaWiki\SpecialPage\SpecialPageFactory;
+use MediaWiki\User\CentralId\CentralIdLookup;
+use MediaWiki\User\Options\UserOptionsLookup;
 use MediaWiki\User\UserFactory;
 use MediaWiki\User\UserGroupManager;
 use MediaWiki\User\UserIdentity;
 use MediaWiki\User\UserIdentityLookup;
-use SpecialPage;
 use Wikimedia\IPUtils;
 use Wikimedia\Rdbms\IConnectionProvider;
 
@@ -36,9 +37,10 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 	 * @param IConnectionProvider $dbProvider
 	 * @param SpecialPageFactory $specialPageFactory
 	 * @param UserIdentityLookup $userIdentityLookup
-	 * @param ActorMigration $actorMigration
 	 * @param CheckUserLogService $checkUserLogService
 	 * @param UserFactory $userFactory
+	 * @param CheckUserLookupUtils $checkUserLookupUtils
+	 * @param UserOptionsLookup $userOptionsLookup
 	 * @param IContextSource|null $context
 	 * @param LinkRenderer|null $linkRenderer
 	 * @param ?int $limit
@@ -53,16 +55,17 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 		IConnectionProvider $dbProvider,
 		SpecialPageFactory $specialPageFactory,
 		UserIdentityLookup $userIdentityLookup,
-		ActorMigration $actorMigration,
 		CheckUserLogService $checkUserLogService,
 		UserFactory $userFactory,
-		IContextSource $context = null,
-		LinkRenderer $linkRenderer = null,
+		CheckUserLookupUtils $checkUserLookupUtils,
+		UserOptionsLookup $userOptionsLookup,
+		?IContextSource $context = null,
+		?LinkRenderer $linkRenderer = null,
 		?int $limit = null
 	) {
 		parent::__construct( $opts, $target, $logType, $tokenQueryManager, $userGroupManager, $centralIdLookup,
-			$dbProvider, $specialPageFactory, $userIdentityLookup, $actorMigration, $checkUserLogService,
-			$userFactory, $context, $linkRenderer, $limit );
+			$dbProvider, $specialPageFactory, $userIdentityLookup, $checkUserLogService, $userFactory,
+			$checkUserLookupUtils, $userOptionsLookup, $context, $linkRenderer, $limit );
 		$this->checkType = SpecialCheckUser::SUBTYPE_GET_IPS;
 	}
 
@@ -143,13 +146,9 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 	 */
 	protected function getCountForIPActions( string $ip_or_range ) {
 		$count = false;
-		$tables = self::RESULT_TABLES;
-		if ( !$this->eventTableReadNew ) {
-			$tables = [ self::CHANGES_TABLE ];
-		}
 		$countsPerTable = [];
 		// Get the total count and counts by this user.
-		foreach ( $tables as $table ) {
+		foreach ( self::RESULT_TABLES as $table ) {
 			$countsPerTable[$table] = $this->getCountForIPActionsPerTable( $ip_or_range, $table );
 		}
 		// Display the count if at least one of the counts for a table has more actions
@@ -173,34 +172,27 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 	 * Return the number of actions performed by all users
 	 * and the current target on a given IP or IP range.
 	 *
-	 * @param string $ip_or_range The IP or IP range to get the counts from.
+	 * @param string $ipOrRange The IP or IP range to get the counts from.
 	 * @param string $table The table to get these results from (valid tables in self::RESULT_TABLES).
 	 * @return array<string, integer>|null
 	 */
-	protected function getCountForIPActionsPerTable( string $ip_or_range, string $table ): ?array {
-		$conds = self::getIpConds( $this->mDb, $ip_or_range, false, $table );
-		if ( !$conds ) {
+	protected function getCountForIPActionsPerTable( string $ipOrRange, string $table ): ?array {
+		// Get the IExpression which allows selecting results for the IP or IP range.
+		$expr = $this->checkUserLookupUtils->getIPTargetExpr( $ipOrRange, false, $table );
+		if ( $expr === null ) {
+			// Return null if no target conditions could be generated.
 			return null;
 		}
 		// We are only using startOffset for the period feature.
 		if ( $this->startOffset ) {
-			$conds[] = $this->mDb->buildComparison(
-				'>=', [ $this->getTimestampField( $table ) => $this->startOffset ]
-			);
-		}
-
-		// If the $table is cu_changes and event table migration
-		// is set to read new, then only include rows that have
-		// cuc_only_for_read_old equal to 0 to prevent duplicate
-		// rows appearing.
-		if ( $this->eventTableReadNew && $table === self::CHANGES_TABLE ) {
-			$conds['cuc_only_for_read_old'] = 0;
+			$expr = $this->mDb->expr( $this->getTimestampField( $table ), '>=', $this->startOffset )
+				->andExpr( $expr );
 		}
 
 		// Get counts for this IP / IP range
 		$query = $this->mDb->newSelectQueryBuilder()
 			->table( $table )
-			->conds( $conds )
+			->conds( $expr )
 			->caller( __METHOD__ );
 		$ipEdits = $query->estimateRowCount();
 		// If small enough, get a more accurate count
@@ -209,7 +201,8 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 		}
 
 		// Get counts for the target on this IP / IP range
-		$conds['actor_user'] = $this->target->getId();
+		$expr = $this->mDb->expr( 'actor_user', '=', $this->target->getId() )
+			->andExpr( $expr );
 		$query = $this->mDb->newSelectQueryBuilder()
 			->table( $table )
 			->join(
@@ -217,7 +210,7 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 				"{$table}_actor",
 				"{$table}_actor.actor_id = {$this::RESULT_TABLE_TO_PREFIX[$table]}actor"
 			)
-			->conds( $conds )
+			->conds( $expr )
 			->caller( __METHOD__ );
 		$userOnIpEdits = $query->estimateRowCount();
 		// If small enough, get a more accurate count
@@ -291,7 +284,9 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 		}
 
 		// Apply index, group by IP / IP hex, and filter results to just the target user.
-		$queryInfo['options']['USE INDEX'] = [ $table => $this->getIndexName( $table ) ];
+		$queryInfo['options']['USE INDEX'] = [
+			$table => $this->checkUserLookupUtils->getIndexName( $this->xfor, $table )
+		];
 		$queryInfo['options']['GROUP BY'] = [ 'ip', 'ip_hex' ];
 		$queryInfo['conds']['actor_user'] = $this->target->getId();
 
@@ -313,11 +308,6 @@ class CheckUserGetIPsPager extends AbstractCheckUserPager {
 			'join_conds' => [ 'actor_cuc_actor' => [ 'JOIN', 'actor_cuc_actor.actor_id=cuc_actor' ] ],
 			'options' => [],
 		];
-		// When reading new, only select results from cu_changes that are
-		// for read new (defined as those with cuc_only_for_read_old set to 0).
-		if ( $this->eventTableReadNew ) {
-			$queryInfo['conds']['cuc_only_for_read_old'] = 0;
-		}
 		return $queryInfo;
 	}
 

@@ -3,11 +3,10 @@
 -- Do not modify this file directly.
 -- See https://www.mediawiki.org/wiki/Manual:Schema_changes
 CREATE TABLE /*_*/cu_changes (
-  cuc_id INT UNSIGNED AUTO_INCREMENT NOT NULL,
+  cuc_id BIGINT UNSIGNED AUTO_INCREMENT NOT NULL,
   cuc_namespace INT DEFAULT 0 NOT NULL,
   cuc_title VARBINARY(255) DEFAULT '' NOT NULL,
   cuc_actor BIGINT UNSIGNED NOT NULL,
-  cuc_actiontext VARBINARY(255) DEFAULT '' NOT NULL,
   cuc_comment_id BIGINT UNSIGNED NOT NULL,
   cuc_minor TINYINT(1) DEFAULT 0 NOT NULL,
   cuc_page_id INT UNSIGNED DEFAULT 0 NOT NULL,
@@ -20,8 +19,7 @@ CREATE TABLE /*_*/cu_changes (
   cuc_xff VARBINARY(255) DEFAULT '',
   cuc_xff_hex VARCHAR(255) DEFAULT NULL,
   cuc_agent VARBINARY(255) DEFAULT NULL,
-  cuc_private MEDIUMBLOB DEFAULT NULL,
-  cuc_only_for_read_old TINYINT(1) DEFAULT 0 NOT NULL,
+  cuc_agent_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   INDEX cuc_ip_hex_time (cuc_ip_hex, cuc_timestamp),
   INDEX cuc_xff_hex_time (cuc_xff_hex, cuc_timestamp),
   INDEX cuc_timestamp (cuc_timestamp),
@@ -40,6 +38,7 @@ CREATE TABLE /*_*/cu_log_event (
   cule_xff VARBINARY(255) DEFAULT '',
   cule_xff_hex VARCHAR(255) DEFAULT NULL,
   cule_agent VARBINARY(255) DEFAULT NULL,
+  cule_agent_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   INDEX cule_ip_hex_time (cule_ip_hex, cule_timestamp),
   INDEX cule_xff_hex_time (cule_xff_hex, cule_timestamp),
   INDEX cule_timestamp (cule_timestamp),
@@ -54,7 +53,7 @@ CREATE TABLE /*_*/cu_private_event (
   cupe_id BIGINT UNSIGNED AUTO_INCREMENT NOT NULL,
   cupe_namespace INT DEFAULT 0 NOT NULL,
   cupe_title VARBINARY(255) DEFAULT '' NOT NULL,
-  cupe_actor BIGINT UNSIGNED DEFAULT 0 NOT NULL,
+  cupe_actor BIGINT UNSIGNED DEFAULT 0,
   cupe_log_type VARBINARY(32) DEFAULT '' NOT NULL,
   cupe_log_action VARBINARY(32) DEFAULT '' NOT NULL,
   cupe_params BLOB NOT NULL,
@@ -66,6 +65,7 @@ CREATE TABLE /*_*/cu_private_event (
   cupe_xff VARBINARY(255) DEFAULT '',
   cupe_xff_hex VARCHAR(255) DEFAULT NULL,
   cupe_agent VARBINARY(255) DEFAULT NULL,
+  cupe_agent_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   cupe_private MEDIUMBLOB DEFAULT NULL,
   INDEX cupe_ip_hex_time (cupe_ip_hex, cupe_timestamp),
   INDEX cupe_xff_hex_time (cupe_xff_hex, cupe_timestamp),
@@ -74,6 +74,14 @@ CREATE TABLE /*_*/cu_private_event (
     cupe_actor, cupe_ip, cupe_timestamp
   ),
   PRIMARY KEY(cupe_id)
+) /*$wgDBTableOptions*/;
+
+
+CREATE TABLE /*_*/cu_useragent (
+  cuua_id BIGINT UNSIGNED AUTO_INCREMENT NOT NULL,
+  cuua_text VARBINARY(255) NOT NULL,
+  INDEX cuua_text (cuua_text),
+  PRIMARY KEY(cuua_id)
 ) /*$wgDBTableOptions*/;
 
 
@@ -104,6 +112,8 @@ CREATE TABLE /*_*/cu_log (
   cul_actor BIGINT UNSIGNED NOT NULL,
   cul_reason_id BIGINT UNSIGNED NOT NULL,
   cul_reason_plaintext_id BIGINT UNSIGNED NOT NULL,
+  cul_result_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
+  cul_result_plaintext_id BIGINT UNSIGNED DEFAULT 0 NOT NULL,
   cul_type VARBINARY(30) NOT NULL,
   cul_target_id INT UNSIGNED DEFAULT 0 NOT NULL,
   cul_target_text BLOB NOT NULL,

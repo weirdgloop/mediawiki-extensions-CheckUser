@@ -2,6 +2,7 @@
 	"@metadata": {
 		"authors": [
 			"Dreamy Jazz",
+			"Killy95",
 			"Kwisha",
 			"Lloffiwr",
 			"Stephenwanjau",
@@ -22,7 +23,7 @@
 	"checkuser-showlog": "Onyesha kumbukumbu",
 	"checkuser-target": "Anwani ya IP au jina la mtumiaji:",
 	"checkuser-users": "Leta watumiaji",
-	"checkuser-edits": "Leta haririo zilizotoka anwani ya IP fulani",
+	"checkuser-actions": "Pata hatua",
 	"checkuser-ips": "Leta anwani za IP",
 	"checkuser-period": "Muda:",
 	"checkuser-week-1": "wiki iliyopita",
@@ -36,9 +37,6 @@
 	"checkuser-search": "Tafuta",
 	"checkuser-search-submit": "Tafuta",
 	"checkuser-ipeditcount": "~$1 kutoka kwa watumiaji wote",
-	"checkuser-create-action": "iliumbwa",
-	"checkuser-email-action": "alituma barua pepe kwa mtumiaji \"$1\"",
-	"checkuser-reset-action": "seti upya nywila ya \"$1\"",
 	"logentry-checkuser-private-event-create-account": "iliumbwa",
 	"checkuser-tempaccount-reveal-ip-missing": "haipatikani"
 }

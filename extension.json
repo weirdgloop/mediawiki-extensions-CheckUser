@@ -11,7 +11,7 @@
 	"license-name": "GPL-2.0-or-later",
 	"type": "specialpage",
 	"requires": {
-		"MediaWiki": ">= 1.41",
+		"MediaWiki": ">= 1.43.0",
 		"platform": {
 			"ext-openssl": "*"
 		}
@@ -43,6 +43,10 @@
 			"value": false,
 			"description": "Whether to force checkusers into giving a reason for each check they do through Special:CheckUser."
 		},
+		"CheckUserGlobalContributionsCentralWikiId": {
+			"value": false,
+			"description": "The wiki ID to use when redirecting users to [[Special:GlobalContributions]] on a central wiki. If set to false, no redirect occurs."
+		},
 		"CheckUserCAMultiLock": {
 			"value": false,
 			"description": "Whether to add a link to Special:MultiLock by CentralAuth to the Special:CheckUser's mass block form. This requires CentralAuth extension to be installed on the wiki. To enable this, set this to an array with a central wiki's database name and an array with the name(s) of the global group(s) to add the link for. Example: [ 'centralDB' => 'metawiki', 'groups' => [ 'steward' ] ]"
@@ -53,7 +57,7 @@
 		},
 		"CheckUserGBtoollink": {
 			"value": false,
-			"description": "Whether to add links for globally blocking accounts shown in Special:CheckUser results"
+			"description": "Configuration for adding links for globally blocking accounts shown in Special:CheckUser results. Array with keys 'centralDB' for the ID of the wiki where global blocks are made, and 'groups' for the groups that can make global blocks there. False if links should not be added."
 		},
 		"CheckUserCollapseCheckUserHelperByDefault": {
 			"value": 2500,
@@ -67,37 +71,21 @@
 			"value": true,
 			"description": "Whether successful login attempts of accounts in the 'bot' user group should be logged in CheckUser logs (assuming wgCheckUserLogLogins is also true)"
 		},
-		"CheckUserEnableSpecialInvestigate": {
-			"value": true,
-			"description": "Enables Special:Investigate"
-		},
-		"CheckUserLogAdditionalRights": {
-			"value": [],
-			"description": "Additional rights to be used when adding CheckUser log entries"
-		},
 		"CheckUserMaximumRowCount": {
 			"value": 5000,
-			"description": "Maximum number of rows in cu_changes to be used in any query"
+			"description": "Maximum number of rows to be displayed in Special:CheckUser per page of results"
 		},
 		"CheckUserInvestigateMaximumRowCount": {
 			"value": 25000,
-			"description": "Maximum number of rows in cu_changes to be grouped in the Compare table query"
+			"description": "Maximum number of rows from the CheckUser result tables to be grouped in the Compare table query"
 		},
 		"CheckUserTemporaryAccountMaxAge": {
 			"value": 86400,
 			"description": "Number of seconds for which the temporary account API response is fresh"
 		},
-		"CheckUserEventTablesMigrationStage": {
-			"value": 259,
-			"description": "A flag used as the migration stage to the new cu_private_event and cu_log_event tables. Currently set to SCHEMA_COMPAT_OLD | SCHEMA_COMPAT_WRITE_NEW which evaluates to the integer 259."
-		},
 		"CheckUserClientHintsEnabled": {
 			"value": true,
 			"description": "General on/off switch for User-Agent Client Hints functionality. When set to true, CheckUser will request Client Hints headers specified in the CheckUserClientHintsHeaders config variable."
-		},
-		"CheckUserPurgeOldClientHintsData": {
-			"value": true,
-			"description": "Used to control whether CheckUser will attempt to purge old client hint data. This is done so that wgCheckUserClientHintsEnabled can be set to false without preventing cleaning up of old client hint data."
 		},
 		"CheckUserClientHintsRestApiMaxTimeLag": {
 			"value": 1800,
@@ -150,9 +138,15 @@
 		},
 		"CheckUserClientHintsValuesToHide": {
 			"value": {
-				"architecture": [ "x86" ],
-				"bitness": [ "64" ],
-				"woW64": [ false ]
+				"architecture": [
+					"x86"
+				],
+				"bitness": [
+					"64"
+				],
+				"woW64": [
+					false
+				]
 			},
 			"description": "An array of the Client Hints data names as keys and an array of values that should be hidden from the interface as the value. This is used to hide commonly seen Client Hint data values in the cases where it isn't helpful."
 		},
@@ -163,18 +157,33 @@
 		"CheckUserDeveloperMode": {
 			"value": false,
 			"description": "If set to 'true', then CheckUser will be know it is in development mode. Do not enable this on any wikis other than local development wikis. This will allow use of code that is only intended for local development wikis, such as the populateCheckUserTablesWithSimulatedData.php maintenance script which inserts automated testing edits and actions to the wiki."
+		},
+		"CheckUserMaximumIPsToAutoblock": {
+			"value": 1,
+			"description": "The maximum number of IPs to retroactively autoblock when a block is created that is set to autoblock. The actual number of IPs blocked will be smaller if the CheckUser data for this user has less than this number of IPs. If this number is greater, then the IPs blocked are those which were used last."
+		},
+		"CheckUserCentralIndexGroupsToExclude": {
+			"value": [ "bot" ],
+			"description": "Users in any of these user groups will not have their actions stored in the central index tables. Used to reduce the rate at which rows are updated for users which are expected to make frequent updates (such as bots) and often do not need review from the CheckUser tools."
+		},
+		"CheckUserCentralIndexRangesToExclude": {
+			"value": [],
+			"description": "Exclude actions from being recorded in the central user index if they are within the ranges or are using an IP specified in this config. This is ignored for writes to the cuci_temp_edit table. Used to reduce the rate at which rows are updated for users which are expected to make frequent updates."
+		},
+		"CheckUserWriteToCentralIndex": {
+			"value": true,
+			"description": "Whether to add entries to the central index for this local wiki. Useful in case a wiki is not part of a SUL system or is written to too often, so cannot be represented in a central table."
+		},
+		"CheckUserCuciUserRandomChanceDebounceCutoff": {
+			"value": 3600,
+			"description": "Used to control when the random chance to update the cuci_user table is applied. Set to false to disable the random chance of not writing. By default the random chance is applied when the last timestamp for this user and wiki was recorded less than an hour ago."
 		}
 	},
 	"APIListModules": {
 		"checkuser": {
 			"class": "MediaWiki\\CheckUser\\Api\\ApiQueryCheckUser",
 			"services": [
-				"UserIdentityLookup",
-				"RevisionLookup",
-				"ArchivedRevisionLookup",
-				"CheckUserLogService",
-				"CommentStore",
-				"UserFactory"
+				"ApiQueryCheckUserResponseFactory"
 			]
 		},
 		"checkuserlog": {
@@ -198,7 +207,25 @@
 				"UserOptionsLookup",
 				"UserNameUtils",
 				"DBLoadBalancerFactory",
-				"ActorStore"
+				"ActorStore",
+				"BlockManager"
+			]
+		},
+		{
+			"path": "/checkuser/v0/temporaryaccount/ip/{ip}",
+			"method": "POST",
+			"class": "MediaWiki\\CheckUser\\Api\\Rest\\Handler\\TemporaryAccountIPHandler",
+			"services": [
+				"MainConfig",
+				"JobQueueGroup",
+				"PermissionManager",
+				"UserOptionsLookup",
+				"UserNameUtils",
+				"DBLoadBalancerFactory",
+				"ActorStore",
+				"BlockManager",
+				"TempUserConfig",
+				"CheckUserTemporaryAccountsByIPLookup"
 			]
 		},
 		{
@@ -212,7 +239,9 @@
 				"UserOptionsLookup",
 				"UserNameUtils",
 				"DBLoadBalancerFactory",
-				"ActorStore"
+				"ActorStore",
+				"BlockManager",
+				"RevisionStore"
 			]
 		},
 		{
@@ -226,7 +255,8 @@
 				"UserOptionsLookup",
 				"UserNameUtils",
 				"DBLoadBalancerFactory",
-				"ActorStore"
+				"ActorStore",
+				"BlockManager"
 			]
 		},
 		{
@@ -251,7 +281,8 @@
 			"class": "MediaWiki\\CheckUser\\HookHandler\\Preferences",
 			"services": [
 				"PermissionManager",
-				"CheckUserTemporaryAccountLoggerFactory"
+				"CheckUserTemporaryAccountLoggerFactory",
+				"MainConfig"
 			]
 		},
 		"pageDisplay": {
@@ -260,6 +291,24 @@
 				"MainConfig",
 				"PermissionManager",
 				"UserOptionsLookup"
+			]
+		},
+		"CheckUserPrivateEvents": {
+			"class": "MediaWiki\\CheckUser\\HookHandler\\CheckUserPrivateEventsHandler",
+			"services": [
+				"CheckUserInsert",
+				"MainConfig",
+				"UserIdentityLookup",
+				"UserFactory",
+				"ReadOnlyMode"
+			]
+		},
+		"RetroactiveAutoBlock": {
+			"class": "MediaWiki\\CheckUser\\HookHandler\\PerformRetroactiveAutoblockHandler",
+			"services": [
+				"DBLoadBalancerFactory",
+				"DatabaseBlockStoreFactory",
+				"MainConfig"
 			]
 		},
 		"SchemaChanges": {
@@ -272,48 +321,66 @@
 				"SpecialPageFactory",
 				"LinkRenderer",
 				"UserIdentityLookup",
-				"UserIdentityUtils"
+				"UserIdentityUtils",
+				"UserOptionsLookup",
+				"TempUserConfig"
 			]
 		},
 		"RenameUserSQLHandler": {
 			"class": "MediaWiki\\CheckUser\\HookHandler\\RenameUserSQLHandler"
 		},
+		"GlobalBlockingHandler": {
+			"class": "MediaWiki\\CheckUser\\HookHandler\\GlobalBlockingHandler",
+			"services": [
+				"ConnectionProvider",
+				"CentralIdLookup",
+				"ActorStoreFactory"
+			]
+		},
 		"SpecialPageInitList": {
 			"class": "MediaWiki\\CheckUser\\HookHandler\\SpecialPageInitListHandler",
 			"services": [
-				"MainConfig"
+				"TempUserConfig"
+			]
+		},
+		"RecentChangeSaveHandler": {
+			"class": "MediaWiki\\CheckUser\\HookHandler\\RecentChangeSaveHandler",
+			"services": [
+				"CheckUserInsert",
+				"JobQueueGroup",
+				"DBLoadBalancerFactory"
 			]
 		},
 		"RLRegisterModules": {
 			"class": "MediaWiki\\CheckUser\\HookHandler\\RLRegisterModulesHandler"
-		},
-		"Hooks": {
-			"class": "MediaWiki\\CheckUser\\Hooks"
 		},
 		"UserMerge": {
 			"class": "MediaWiki\\CheckUser\\HookHandler\\UserMergeHandler"
 		}
 	},
 	"Hooks": {
-		"AuthManagerLoginAuthenticateAudit": "Hooks",
+		"AuthManagerLoginAuthenticateAudit": "CheckUserPrivateEvents",
 		"BeforePageDisplay": [
 			"clienthints",
 			"pageDisplay"
 		],
+		"BeforeInitialize": "pageDisplay",
 		"ContributionsToolLinks": "ToolLinks",
-		"EmailUser": "Hooks",
+		"EmailUser": "CheckUserPrivateEvents",
 		"GetPreferences": "preferences",
+		"GlobalBlockingGetRetroactiveAutoblockIPs": "GlobalBlockingHandler",
 		"LoadExtensionSchemaUpdates": "SchemaChanges",
-		"LocalUserCreated": "Hooks",
-		"PerformRetroactiveAutoblock": "Hooks",
-		"RecentChange_save": "Hooks",
+		"LocalUserCreated": "CheckUserPrivateEvents",
+		"PerformRetroactiveAutoblock": "RetroactiveAutoBlock",
+		"RecentChange_save": "RecentChangeSaveHandler",
 		"RenameUserSQL": "RenameUserSQLHandler",
 		"ResourceLoaderRegisterModules": "RLRegisterModules",
 		"SaveUserOptions": "preferences",
+		"SpecialContributionsBeforeMainOutput": "ToolLinks",
 		"SpecialPageBeforeExecute": "clienthints",
 		"SpecialPage_initList": "SpecialPageInitList",
-		"User::mailPasswordInternal": "Hooks",
-		"UserLogoutComplete": "Hooks",
+		"User::mailPasswordInternal": "CheckUserPrivateEvents",
+		"UserLogoutComplete": "CheckUserPrivateEvents",
 		"UserMergeAccountFields": "UserMerge",
 		"UserToolLinksEdit": "ToolLinks"
 	},
@@ -341,7 +408,7 @@
 			"packageFiles": [
 				"dispatcher.js",
 				"cidr/cidr.js",
-				"checkuser/caMultiLock.js",
+				"checkuser/getUsersBlockForm.js",
 				"checkuser/checkUserHelper/init.js",
 				"checkuser/checkUserHelper/addCopyElement.js",
 				"checkuser/checkUserHelper/createTable.js",
@@ -352,6 +419,7 @@
 				"investigateblock/investigateblock.js",
 				"investigate/init.js",
 				"investigate/InvestigateMenuSelectWidget.js",
+				"investigate/resetGuidedTour.js",
 				"investigate/tables.js",
 				"investigate/copy.js",
 				"investigate/blockform.js",
@@ -382,7 +450,6 @@
 				"mediawiki.pager.styles",
 				"mediawiki.storage",
 				"mediawiki.Title",
-				"mediawiki.Uri",
 				"mediawiki.user",
 				"mediawiki.util",
 				"mediawiki.widgets",
@@ -400,6 +467,7 @@
 				"checkuser-helper-user",
 				"checkuser-helper-ips",
 				"checkuser-helper-uas",
+				"checkuser-helper-client-hints",
 				"checkuser-helper-xff-trusted",
 				"checkuser-helper-xff-untrusted",
 				"checkuser-cidr-tool-links",
@@ -417,6 +485,9 @@
 				"checkuser-investigate-compare-table-button-filter-label",
 				"checkuser-investigate-subtitle-cancel-button-label",
 				"checkuser-investigate-subtitle-continue-button-label",
+				"checkuser-ip-contributions",
+				"checkuser-ip-contributions-target-label",
+				"checkuser-ip-contributions-target-error-no-ip",
 				"checkuser-tempaccount-no-ip-results",
 				"checkuser-tempaccount-reveal-ip-button-label",
 				"checkuser-tempaccount-reveal-ip-missing",
@@ -425,7 +496,7 @@
 			]
 		},
 		"ext.checkUser.styles": {
-			"class": "ResourceLoaderLessVarFileModule",
+			"class": "MediaWiki\\ResourceLoader\\LessVarFileModule",
 			"localBasePath": "modules/ext.checkUser.styles",
 			"remoteExtPath": "CheckUser/modules/ext.checkUser.styles",
 			"styles": [
@@ -452,36 +523,86 @@
 		"remoteExtPath": "CheckUser",
 		"packageFiles": [
 			"tests/qunit/index.js",
-			"tests/qunit/ext.checkUser/checkUserHelper/utils.test.js",
-			"tests/qunit/ext.checkUser/checkUserHelper/createTable.test.js",
-			"tests/qunit/ext.checkUser/checkUserHelper/createTableText.test.js",
-			"tests/qunit/ext.checkUser/checkUserHelper/generateData.test.js",
+			"tests/qunit/ext.checkUser/checkuser/getUsersBlockForm.test.js",
+			"modules/ext.checkUser/checkuser/getUsersBlockForm.js",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/utils.test.js",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/createTable.test.js",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/createTableText.test.js",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/generateData.test.js",
 			"modules/ext.checkUser/checkuser/checkUserHelper/init.js",
 			"modules/ext.checkUser/checkuser/checkUserHelper/addCopyElement.js",
 			"modules/ext.checkUser/checkuser/checkUserHelper/createTable.js",
 			"modules/ext.checkUser/checkuser/checkUserHelper/createTableText.js",
 			"modules/ext.checkUser/checkuser/checkUserHelper/generateData.js",
 			"modules/ext.checkUser/checkuser/checkUserHelper/utils.js",
-			"tests/qunit/ext.checkUser/checkUserHelper/cases/calculateIPNumber.json",
-			"tests/qunit/ext.checkUser/checkUserHelper/cases/compareIPs.json",
-			"tests/qunit/ext.checkUser/checkUserHelper/cases/createTable.json",
-			"tests/qunit/ext.checkUser/checkUserHelper/cases/createTableText.json",
-			"tests/qunit/ext.checkUser/checkUserHelper/cases/generateData.json"
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/cases/calculateIPNumber.json",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/cases/compareIPs.json",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/cases/createTable.json",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/cases/createTableText.json",
+			"tests/qunit/ext.checkUser/checkuser/checkUserHelper/cases/generateData.json",
+			"tests/qunit/ext.checkUser.clientHints/index.test.js",
+			"modules/ext.checkUser.clientHints/index.js",
+			"tests/qunit/ext.checkUser/investigate/blockform.test.js",
+			"modules/ext.checkUser/investigate/blockform.js",
+			"tests/qunit/ext.checkUser/investigate/cases/blockFormWidgetVisibility.json",
+			"tests/qunit/ext.checkUser/temporaryaccount/SpecialContributions.test.js",
+			"modules/ext.checkUser/temporaryaccount/SpecialContributions.js",
+			"tests/qunit/ext.checkUser/temporaryaccount/ipRevealUtils.test.js",
+			"modules/ext.checkUser/temporaryaccount/ipRevealUtils.js",
+			"tests/qunit/ext.checkUser/temporaryaccount/ipReveal.test.js",
+			"tests/qunit/ext.checkUser/temporaryaccount/utils.js",
+			"modules/ext.checkUser/temporaryaccount/ipReveal.js",
+			"modules/ext.checkUser/temporaryaccount/rest.js",
+			"tests/qunit/ext.checkUser/temporaryaccount/initOnLoad.test.js",
+			"modules/ext.checkUser/temporaryaccount/initOnLoad.js",
+			"tests/qunit/ext.checkUser/temporaryaccount/initOnHook.test.js",
+			"modules/ext.checkUser/temporaryaccount/initOnHook.js",
+			"tests/qunit/ext.checkUser/temporaryaccount/rest.test.js",
+			"tests/qunit/ext.checkUser/temporaryaccount/SpecialBlock.test.js",
+			"modules/ext.checkUser/temporaryaccount/SpecialBlock.js"
 		],
 		"dependencies": [
 			"mediawiki.qunit-testrunner",
 			"mediawiki.base",
 			"mediawiki.router",
+			"mediawiki.storage",
+			"mediawiki.util",
 			"mediawiki.widgets",
+			"mediawiki.widgets.UserInputWidget",
 			"ext.checkUser",
+			"ext.checkUser.clientHints",
 			"sinonjs"
 		]
 	},
 	"GroupPermissions": {
 		"checkuser": {
 			"checkuser": true,
-			"checkuser-log": true
+			"checkuser-log": true,
+			"checkuser-temporary-account-no-preference": true,
+			"checkuser-temporary-account-log": true
+		},
+		"checkuser-temporary-account-viewer": {
+			"checkuser-temporary-account": true
 		}
+	},
+	"GrantPermissions": {
+		"checkuser": {
+			"checkuser": true,
+			"checkuser-log": true
+		},
+		"checkuser-temporary-account": {
+			"checkuser-temporary-account": true,
+			"checkuser-temporary-account-no-preference": true,
+			"checkuser-temporary-account-log": true
+		}
+	},
+	"GrantPermissionGroups": {
+		"checkuser": "administration",
+		"checkuser-temporary-account": "administration"
+	},
+	"GrantRiskGroups": {
+		"checkuser": "security",
+		"checkuser-temporary-account": "low"
 	},
 	"PrivilegedGroups": [
 		"checkuser"
@@ -490,6 +611,7 @@
 		"checkuser",
 		"checkuser-log",
 		"checkuser-temporary-account",
+		"checkuser-temporary-account-no-preference",
 		"checkuser-temporary-account-log"
 	],
 	"SpecialPages": {
@@ -497,19 +619,13 @@
 			"class": "MediaWiki\\CheckUser\\CheckUser\\SpecialCheckUser",
 			"services": [
 				"LinkBatchFactory",
-				"BlockPermissionCheckerFactory",
-				"BlockUserFactory",
 				"UserGroupManager",
 				"CentralIdLookupFactory",
-				"WikiPageFactory",
 				"PermissionManager",
 				"UserIdentityLookup",
 				"CheckUserTokenQueryManager",
 				"DBLoadBalancerFactory",
-				"ActorMigration",
 				"UserFactory",
-				"RevisionStore",
-				"ArchivedRevisionLookup",
 				"CheckUserLogService",
 				"CommentFormatter",
 				"UserEditTracker",
@@ -519,7 +635,10 @@
 				"CheckUserUtilityService",
 				"CommentStore",
 				"UserAgentClientHintsLookup",
-				"UserAgentClientHintsFormatter"
+				"UserAgentClientHintsFormatter",
+				"CheckUserLookupUtils",
+				"LogFormatterFactory",
+				"UserOptionsLookup"
 			]
 		},
 		"CheckUserLog": {
@@ -534,6 +653,38 @@
 				"ActorStore",
 				"DBLoadBalancerFactory"
 			]
+		},
+		"Investigate": {
+			"class": "MediaWiki\\CheckUser\\Investigate\\SpecialInvestigate",
+			"services": [
+				"LinkRenderer",
+				"ContentLanguage",
+				"UserOptionsManager",
+				"CheckUserPreliminaryCheckPagerFactory",
+				"CheckUserComparePagerFactory",
+				"CheckUserTimelinePagerFactory",
+				"CheckUserTokenQueryManager",
+				"CheckUserDurationManager",
+				"CheckUserEventLogger",
+				"CheckUserGuidedTourLauncher",
+				"CheckUserHookRunner",
+				"PermissionManager",
+				"CheckUserLogService",
+				"UserIdentityLookup",
+				"UserFactory",
+				"UrlUtils"
+			]
+		},
+		"InvestigateBlock": {
+			"class": "MediaWiki\\CheckUser\\Investigate\\SpecialInvestigateBlock",
+			"services": [
+				"BlockUserFactory",
+				"BlockPermissionCheckerFactory",
+				"PermissionManager",
+				"TitleFormatter",
+				"UserFactory",
+				"CheckUserEventLogger"
+			]
 		}
 	},
 	"LogTypes": [
@@ -546,8 +697,18 @@
 		"checkuser-temporary-account": "checkuser-temporary-account-log-header"
 	},
 	"LogActionsHandlers": {
-		"checkuser-temporary-account/*": "MediaWiki\\CheckUser\\Logging\\TemporaryAccountLogFormatter",
-		"checkuser-private-event/*": "MediaWiki\\CheckUser\\Logging\\CheckUserPrivateEventLogFormatter"
+		"checkuser-temporary-account/*": {
+			"class": "MediaWiki\\CheckUser\\Logging\\TemporaryAccountLogFormatter",
+			"services": [
+				"UserFactory"
+			]
+		},
+		"checkuser-private-event/*": {
+			"class": "MediaWiki\\CheckUser\\Logging\\CheckUserPrivateEventLogFormatter",
+			"services": [
+				"UserFactory"
+			]
+		}
 	},
 	"LogRestrictions": {
 		"checkuser-temporary-account": "checkuser-temporary-account-log",
@@ -556,18 +717,29 @@
 	"ActionFilteredLogs": {
 		"checkuser-temporary-account": {
 			"change-access": [
-				"change-access"
+				"change-access",
+				"af-change-access-enable",
+				"af-change-access-disable"
 			],
 			"view-ips": [
-				"view-ips"
+				"view-ips",
+				"view-temporary-accounts-on-ip",
+				"af-view-protected-var-value"
 			]
 		}
 	},
 	"JobClasses": {
 		"checkuserLogTemporaryAccountAccess": "\\MediaWiki\\CheckUser\\Jobs\\LogTemporaryAccountAccessJob",
-		"checkuserPruneCheckUserDataJob": "\\MediaWiki\\CheckUser\\Jobs\\PruneCheckUserDataJob"
+		"checkuserPruneCheckUserDataJob": "\\MediaWiki\\CheckUser\\Jobs\\PruneCheckUserDataJob",
+		"checkuserUpdateUserCentralIndexJob": {
+			"class": "MediaWiki\\CheckUser\\Jobs\\UpdateUserCentralIndexJob",
+			"services": [
+				"ConnectionProvider"
+			]
+		}
 	},
 	"AutoloadClasses": {
+		"MediaWiki\\CheckUser\\CheckUserQueryInterface": "src/CheckUserQueryInterface.php",
 		"MediaWiki\\CheckUser\\Hook\\CheckUserInsertChangesRow": "src/Hook/CheckUserInsertChangesRowHook.php",
 		"MediaWiki\\CheckUser\\Hook\\CheckUserInsertChangesRowHook": "src/Hook/CheckUserInsertChangesRowHook.php",
 		"MediaWiki\\CheckUser\\Hook\\CheckUserInsertLogEventRow": "src/Hook/CheckUserInsertLogEventRowHook.php",
@@ -582,7 +754,10 @@
 		"MediaWiki\\CheckUser\\Maintenance\\PopulateCulComment": "maintenance/populateCulComment.php",
 		"MediaWiki\\CheckUser\\Maintenance\\MoveLogEntriesFromCuChanges": "maintenance/moveLogEntriesFromCuChanges.php",
 		"MediaWiki\\CheckUser\\Maintenance\\PopulateCheckUserTablesWithSimulatedData": "maintenance/populateCheckUserTablesWithSimulatedData.php",
-		"MediaWiki\\CheckUser\\Maintenance\\GenerateStatsAboutClientHintsData": "maintenance/generateStatsAboutClientHintsData.php"
+		"MediaWiki\\CheckUser\\Maintenance\\GenerateStatsAboutClientHintsData": "maintenance/generateStatsAboutClientHintsData.php",
+		"MediaWiki\\CheckUser\\Maintenance\\FixTrailingSpacesInLogs": "maintenance/fixTrailingSpacesInLogs.php",
+		"MediaWiki\\CheckUser\\Maintenance\\DeleteReadOldRowsInCuChanges": "maintenance/deleteReadOldRowsInCuChanges.php",
+		"MediaWiki\\CheckUser\\Maintenance\\PopulateCentralCheckUserIndexTables": "maintenance/populateCentralCheckUserIndexTables.php"
 	},
 	"ServiceWiringFiles": [
 		"src/ServiceWiring.php"
@@ -590,11 +765,17 @@
 	"AutoloadNamespaces": {
 		"MediaWiki\\CheckUser\\": "src/"
 	},
+	"TestAutoloadClasses": {
+		"MediaWiki\\CheckUser\\Tests\\Integration\\Maintenance\\Mocks\\SemiMockedCheckUserDataPurger": "tests/phpunit/integration/maintenance/mocks/SemiMockedCheckUserDataPurger.php"
+	},
 	"TestAutoloadNamespaces": {
 		"MediaWiki\\CheckUser\\Tests\\": "tests/phpunit/",
 		"MediaWiki\\CheckUser\\Tests\\Unit\\": "tests/phpunit/unit",
 		"MediaWiki\\CheckUser\\Tests\\Integration\\": "tests/phpunit/integration"
 	},
 	"load_composer_autoloader": true,
+	"DatabaseVirtualDomains": [
+		"virtual-checkuser-global"
+	],
 	"manifest_version": 2
 }

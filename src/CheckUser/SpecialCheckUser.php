@@ -2,20 +2,16 @@
 
 namespace MediaWiki\CheckUser\CheckUser;
 
-use ActorMigration;
-use CentralIdLookup;
-use Html;
-use HTMLForm;
-use MediaWiki\Block\BlockPermissionCheckerFactory;
-use MediaWiki\Block\BlockUserFactory;
+use LogFormatterFactory;
 use MediaWiki\Cache\LinkBatchFactory;
 use MediaWiki\CheckUser\CheckUser\Pagers\AbstractCheckUserPager;
-use MediaWiki\CheckUser\CheckUser\Pagers\CheckUserGetEditsPager;
+use MediaWiki\CheckUser\CheckUser\Pagers\CheckUserGetActionsPager;
 use MediaWiki\CheckUser\CheckUser\Pagers\CheckUserGetIPsPager;
 use MediaWiki\CheckUser\CheckUser\Pagers\CheckUserGetUsersPager;
 use MediaWiki\CheckUser\CheckUser\Widgets\CIDRCalculator;
 use MediaWiki\CheckUser\Hook\HookRunner;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
+use MediaWiki\CheckUser\Services\CheckUserLookupUtils;
 use MediaWiki\CheckUser\Services\CheckUserUtilityService;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsFormatter;
@@ -23,12 +19,15 @@ use MediaWiki\CheckUser\Services\UserAgentClientHintsLookup;
 use MediaWiki\CommentFormatter\CommentFormatter;
 use MediaWiki\CommentStore\CommentStore;
 use MediaWiki\Html\FormOptions;
-use MediaWiki\Page\WikiPageFactory;
+use MediaWiki\Html\Html;
+use MediaWiki\HTMLForm\HTMLForm;
+use MediaWiki\Message\Message;
 use MediaWiki\Permissions\PermissionManager;
-use MediaWiki\Revision\ArchivedRevisionLookup;
-use MediaWiki\Revision\RevisionStore;
+use MediaWiki\SpecialPage\SpecialPage;
 use MediaWiki\Title\Title;
+use MediaWiki\User\CentralId\CentralIdLookup;
 use MediaWiki\User\CentralId\CentralIdLookupFactory;
+use MediaWiki\User\Options\UserOptionsLookup;
 use MediaWiki\User\UserEditTracker;
 use MediaWiki\User\UserFactory;
 use MediaWiki\User\UserGroupManager;
@@ -37,16 +36,10 @@ use MediaWiki\User\UserIdentityLookup;
 use MediaWiki\User\UserIdentityValue;
 use MediaWiki\User\UserNamePrefixSearch;
 use MediaWiki\User\UserNameUtils;
-use MediaWiki\User\UserRigorOptions;
-use Message;
 use OOUI\IconWidget;
-use SpecialPage;
-use Status;
 use UserBlockedError;
-use Wikimedia\AtEase\AtEase;
 use Wikimedia\IPUtils;
 use Wikimedia\Rdbms\IConnectionProvider;
-use WikitextContent;
 
 class SpecialCheckUser extends SpecialPage {
 	/**
@@ -56,7 +49,7 @@ class SpecialCheckUser extends SpecialPage {
 	 */
 	public const SUBTYPE_GET_IPS = 'subuserips';
 
-	public const SUBTYPE_GET_EDITS = 'subedits';
+	public const SUBTYPE_GET_ACTIONS = 'subactions';
 
 	public const SUBTYPE_GET_USERS = 'subipusers';
 
@@ -66,19 +59,13 @@ class SpecialCheckUser extends SpecialPage {
 	protected $opts;
 
 	private LinkBatchFactory $linkBatchFactory;
-	private BlockPermissionCheckerFactory $blockPermissionCheckerFactory;
-	private BlockUserFactory $blockUserFactory;
 	private UserGroupManager $userGroupManager;
 	private CentralIdLookup $centralIdLookup;
-	private WikiPageFactory $wikiPageFactory;
 	private PermissionManager $permissionManager;
 	private UserIdentityLookup $userIdentityLookup;
 	private TokenQueryManager $tokenQueryManager;
 	private IConnectionProvider $dbProvider;
-	private ActorMigration $actorMigration;
 	private UserFactory $userFactory;
-	private RevisionStore $revisionStore;
-	private ArchivedRevisionLookup $archivedRevisionLookup;
 	private CheckUserLogService $checkUserLogService;
 	private CommentFormatter $commentFormatter;
 	private UserEditTracker $userEditTracker;
@@ -89,22 +76,19 @@ class SpecialCheckUser extends SpecialPage {
 	private CommentStore $commentStore;
 	private UserAgentClientHintsLookup $clientHintsLookup;
 	private UserAgentClientHintsFormatter $clientHintsFormatter;
+	private CheckUserLookupUtils $checkUserLookupUtils;
+	private LogFormatterFactory $logFormatterFactory;
+	private UserOptionsLookup $userOptionsLookup;
 
 	/**
 	 * @param LinkBatchFactory $linkBatchFactory
-	 * @param BlockPermissionCheckerFactory $blockPermissionCheckerFactory
-	 * @param BlockUserFactory $blockUserFactory
 	 * @param UserGroupManager $userGroupManager
 	 * @param CentralIdLookupFactory $centralIdLookupFactory
-	 * @param WikiPageFactory $wikiPageFactory
 	 * @param PermissionManager $permissionManager
 	 * @param UserIdentityLookup $userIdentityLookup
 	 * @param TokenQueryManager $tokenQueryManager
 	 * @param IConnectionProvider $dbProvider
-	 * @param ActorMigration $actorMigration
 	 * @param UserFactory $userFactory
-	 * @param RevisionStore $revisionStore
-	 * @param ArchivedRevisionLookup $archivedRevisionLookup
 	 * @param CheckUserLogService $checkUserLogService
 	 * @param CommentFormatter $commentFormatter
 	 * @param UserEditTracker $userEditTracker
@@ -115,22 +99,19 @@ class SpecialCheckUser extends SpecialPage {
 	 * @param CommentStore $commentStore
 	 * @param UserAgentClientHintsLookup $clientHintsLookup
 	 * @param UserAgentClientHintsFormatter $clientHintsFormatter
+	 * @param CheckUserLookupUtils $checkUserLookupUtils
+	 * @param LogFormatterFactory $logFormatterFactory
+	 * @param UserOptionsLookup $userOptionsLookup
 	 */
 	public function __construct(
 		LinkBatchFactory $linkBatchFactory,
-		BlockPermissionCheckerFactory $blockPermissionCheckerFactory,
-		BlockUserFactory $blockUserFactory,
 		UserGroupManager $userGroupManager,
 		CentralIdLookupFactory $centralIdLookupFactory,
-		WikiPageFactory $wikiPageFactory,
 		PermissionManager $permissionManager,
 		UserIdentityLookup $userIdentityLookup,
 		TokenQueryManager $tokenQueryManager,
 		IConnectionProvider $dbProvider,
-		ActorMigration $actorMigration,
 		UserFactory $userFactory,
-		RevisionStore $revisionStore,
-		ArchivedRevisionLookup $archivedRevisionLookup,
 		CheckUserLogService $checkUserLogService,
 		CommentFormatter $commentFormatter,
 		UserEditTracker $userEditTracker,
@@ -140,24 +121,21 @@ class SpecialCheckUser extends SpecialPage {
 		CheckUserUtilityService $checkUserUtilityService,
 		CommentStore $commentStore,
 		UserAgentClientHintsLookup $clientHintsLookup,
-		UserAgentClientHintsFormatter $clientHintsFormatter
+		UserAgentClientHintsFormatter $clientHintsFormatter,
+		CheckUserLookupUtils $checkUserLookupUtils,
+		LogFormatterFactory $logFormatterFactory,
+		UserOptionsLookup $userOptionsLookup
 	) {
 		parent::__construct( 'CheckUser', 'checkuser' );
 
 		$this->linkBatchFactory = $linkBatchFactory;
-		$this->blockPermissionCheckerFactory = $blockPermissionCheckerFactory;
-		$this->blockUserFactory = $blockUserFactory;
 		$this->userGroupManager = $userGroupManager;
 		$this->centralIdLookup = $centralIdLookupFactory->getLookup();
-		$this->wikiPageFactory = $wikiPageFactory;
 		$this->permissionManager = $permissionManager;
 		$this->userIdentityLookup = $userIdentityLookup;
 		$this->tokenQueryManager = $tokenQueryManager;
 		$this->dbProvider = $dbProvider;
-		$this->actorMigration = $actorMigration;
 		$this->userFactory = $userFactory;
-		$this->revisionStore = $revisionStore;
-		$this->archivedRevisionLookup = $archivedRevisionLookup;
 		$this->checkUserLogService = $checkUserLogService;
 		$this->commentFormatter = $commentFormatter;
 		$this->userEditTracker = $userEditTracker;
@@ -168,6 +146,9 @@ class SpecialCheckUser extends SpecialPage {
 		$this->commentStore = $commentStore;
 		$this->clientHintsLookup = $clientHintsLookup;
 		$this->clientHintsFormatter = $clientHintsFormatter;
+		$this->checkUserLookupUtils = $checkUserLookupUtils;
+		$this->logFormatterFactory = $logFormatterFactory;
+		$this->userOptionsLookup = $userOptionsLookup;
 	}
 
 	public function doesWrites() {
@@ -199,17 +180,6 @@ class SpecialCheckUser extends SpecialPage {
 		$opts->add( 'limit', 0 );
 		$opts->add( 'dir', '' );
 		$opts->add( 'token', '' );
-		$opts->add( 'action', '' );
-		$opts->add( 'users', [] );
-		$opts->add( 'blockreason', 'other' );
-		$opts->add( 'blockreason-other', '' );
-		$opts->add( 'blocktalk', false );
-		$opts->add( 'blockemail', false );
-		$opts->add( 'reblock', false );
-		$opts->add( 'usetag', false );
-		$opts->add( 'usettag', false );
-		$opts->add( 'blocktag', '' );
-		$opts->add( 'talktag', '' );
 		$opts->fetchValuesFromRequest( $request );
 
 		// If the client has provided a token, they are trying to paginate.
@@ -251,30 +221,28 @@ class SpecialCheckUser extends SpecialPage {
 
 		$out = $this->getOutput();
 		$links = [];
-		if ( $this->getConfig()->get( 'CheckUserEnableSpecialInvestigate' ) ) {
-			$out->enableOOUI();
-			$out->addModuleStyles( 'oojs-ui.styles.icons-interactions' );
-			$icon = new IconWidget( [ 'icon' => 'lightbulb' ] );
-			$investigateLink = $this->getLinkRenderer()->makeKnownLink(
-				SpecialPage::getTitleFor( 'Investigate' ),
-				$this->msg( 'checkuser-link-investigate-label' )->text()
-			);
-			$out->setIndicators( [ 'investigate-link' => $icon . $investigateLink ] );
-			$query = [];
-			if ( $user !== '' ) {
-				$query['targets'] = $user;
-			}
-			$links[] = Html::rawElement(
-				'span',
-				[],
-				$this->getLinkRenderer()->makeKnownLink(
-					SpecialPage::getTitleFor( 'Investigate' ),
-					$this->msg( $user ? 'checkuser-investigate-this-user' : 'checkuser-show-investigate' )->text(),
-					[],
-					$query
-				)
-			);
+		$out->enableOOUI();
+		$out->addModuleStyles( 'oojs-ui.styles.icons-interactions' );
+		$icon = new IconWidget( [ 'icon' => 'lightbulb' ] );
+		$investigateLink = $this->getLinkRenderer()->makeKnownLink(
+			SpecialPage::getTitleFor( 'Investigate' ),
+			$this->msg( 'checkuser-link-investigate-label' )->text()
+		);
+		$out->setIndicators( [ 'investigate-link' => $icon . $investigateLink ] );
+		$query = [];
+		if ( $user !== '' ) {
+			$query['targets'] = $user;
 		}
+		$links[] = Html::rawElement(
+			'span',
+			[],
+			$this->getLinkRenderer()->makeKnownLink(
+				SpecialPage::getTitleFor( 'Investigate' ),
+				$this->msg( $user ? 'checkuser-investigate-this-user' : 'checkuser-show-investigate' )->text(),
+				[],
+				$query
+			)
+		);
 		if ( $this->permissionManager->userHasRight( $this->getUser(), 'checkuser-log' ) ) {
 			$links[] = Html::rawElement(
 				'span',
@@ -337,8 +305,6 @@ class SpecialCheckUser extends SpecialPage {
 			$checkType = $this->opts->getValue( 'checktype' );
 			if ( !$this->getUser()->matchEditToken( $request->getVal( 'wpEditToken' ) ) ) {
 				$out->wrapWikiMsg( '<div class="error">$1</div>', 'checkuser-token-fail' );
-			} elseif ( $this->opts->getValue( 'action' ) === 'block' ) {
-				$this->doMassUserBlock();
 			} elseif ( !$this->checkReason() ) {
 				$out->addWikiMsg( 'checkuser-noreason' );
 			} elseif ( $checkType == self::SUBTYPE_GET_IPS ) {
@@ -350,16 +316,16 @@ class SpecialCheckUser extends SpecialPage {
 					$pager = $this->getPager( self::SUBTYPE_GET_IPS, $userIdentity, 'userips' );
 					$out->addHtml( $pager->getBody() );
 				}
-			} elseif ( $checkType == self::SUBTYPE_GET_EDITS ) {
+			} elseif ( $checkType == self::SUBTYPE_GET_ACTIONS ) {
 				if ( $isIP && $userIdentity ) {
 					// Target is a IP or range
-					if ( !AbstractCheckUserPager::isValidRange( $userIdentity->getName() ) ) {
+					if ( !$this->checkUserLookupUtils->isValidIPOrRange( $userIdentity->getName() ) ) {
 						$out->addWikiMsg( 'checkuser-range-outside-limit', $userIdentity->getName() );
 					} else {
 						$logType = $xfor ? 'ipedits-xff' : 'ipedits';
 
 						// Ordered in descent by timestamp. Can cause large filesorts on range scans.
-						$pager = $this->getPager( self::SUBTYPE_GET_EDITS, $userIdentity, $logType, $xfor );
+						$pager = $this->getPager( self::SUBTYPE_GET_ACTIONS, $userIdentity, $logType, $xfor );
 						$out->addHTML( $pager->getBody() );
 					}
 				} else {
@@ -370,18 +336,17 @@ class SpecialCheckUser extends SpecialPage {
 						$out->addHTML( $this->msg( 'nosuchusershort', $user )->parseAsBlock() );
 					} else {
 						// Sorting might take some time
-						AtEase::suppressWarnings();
-						set_time_limit( 60 );
-						AtEase::restoreWarnings();
+						// phpcs:ignore Generic.PHP.NoSilencedErrors.Discouraged
+						@set_time_limit( 60 );
 
-						$pager = $this->getPager( self::SUBTYPE_GET_EDITS, $userIdentity, 'useredits' );
+						$pager = $this->getPager( self::SUBTYPE_GET_ACTIONS, $userIdentity, 'useredits' );
 						$out->addHTML( $pager->getBody() );
 					}
 				}
 			} elseif ( $checkType == self::SUBTYPE_GET_USERS ) {
 				if ( !$isIP || !$userIdentity ) {
 					$out->addWikiMsg( 'badipaddress' );
-				} elseif ( !AbstractCheckUserPager::isValidRange( $userIdentity->getName() ) ) {
+				} elseif ( !$this->checkUserLookupUtils->isValidIPOrRange( $userIdentity->getName() ) ) {
 					$out->addWikiMsg( 'checkuser-range-outside-limit', $userIdentity->getName() );
 				} else {
 					$logType = $xfor ? 'ipusers-xff' : 'ipusers';
@@ -393,6 +358,10 @@ class SpecialCheckUser extends SpecialPage {
 		}
 		// Add CIDR calculation convenience JS form
 		$this->addJsCIDRForm();
+		$out->addJsConfigVars(
+			'wgCheckUserDisplayClientHints',
+			$this->getConfig()->get( 'CheckUserDisplayClientHints' )
+		);
 		$out->addModules( 'ext.checkUser' );
 		$out->addModuleStyles( [
 			'mediawiki.interface.helpers.styles',
@@ -427,11 +396,11 @@ class SpecialCheckUser extends SpecialPage {
 			$ipAllowed = false;
 		} elseif ( $checktype == self::SUBTYPE_GET_IPS && !$isIP ) {
 			$checkTypeValidated = $checktype;
-		} elseif ( $checktype == self::SUBTYPE_GET_EDITS ) {
+		} elseif ( $checktype == self::SUBTYPE_GET_ACTIONS ) {
 			$checkTypeValidated = $checktype;
 		// Defaults otherwise
 		} elseif ( $isIP ) {
-			$checkTypeValidated = self::SUBTYPE_GET_EDITS;
+			$checkTypeValidated = self::SUBTYPE_GET_ACTIONS;
 		} else {
 			$checkTypeValidated = self::SUBTYPE_GET_IPS;
 			$ipAllowed = false;
@@ -453,7 +422,7 @@ class SpecialCheckUser extends SpecialPage {
 				'type' => 'radio',
 				'options-messages' => [
 					'checkuser-ips' => self::SUBTYPE_GET_IPS,
-					'checkuser-edits' => self::SUBTYPE_GET_EDITS,
+					'checkuser-actions' => self::SUBTYPE_GET_ACTIONS,
 					'checkuser-users' => self::SUBTYPE_GET_USERS,
 				],
 				'id' => 'checkuserradios',
@@ -514,211 +483,6 @@ class SpecialCheckUser extends SpecialPage {
 	}
 
 	/**
-	 * Block a list of selected users
-	 * with options provided in the POST request.
-	 */
-	protected function doMassUserBlock() {
-		$users = $this->opts->getValue( 'users' );
-		$reason = $this->opts->getValue( 'blockreason-other' );
-		$reasonPrefix = $this->opts->getValue( 'blockreason' );
-
-		if ( $reasonPrefix !== '' && $reasonPrefix !== 'other' ) {
-			$reason = $reasonPrefix . $this->msg( 'colon-separator' )->inContentLanguage()->text() . $reason;
-		}
-		$blockParams = [
-			'reason' => $reason,
-			'email' => $this->opts->getValue( 'blockemail' ),
-			'talk' => $this->opts->getValue( 'blocktalk' ),
-			'reblock' => $this->opts->getValue( 'reblock' ),
-		];
-		$tag = $this->opts->getValue( 'usetag' ) ?
-			trim( $this->opts->getValue( 'blocktag' ) ) : '';
-		$talkTag = $this->opts->getValue( 'usettag' ) ?
-			trim( $this->opts->getValue( 'talktag' ) ) : '';
-		$usersCount = count( $users );
-
-		if (
-			!$usersCount
-			|| !$this->permissionManager->userHasRight( $this->getUser(), 'block' )
-			|| $this->getUser()->getBlock()
-		) {
-			$this->getOutput()->addWikiMsg( 'checkuser-block-failure' );
-			return;
-		}
-
-		if ( $usersCount > $this->getConfig()->get( 'CheckUserMaxBlocks' ) ) {
-			$this->getOutput()->addWikiMsg( 'checkuser-block-limit' );
-			return;
-		}
-
-		if ( !$blockParams['reason'] ) {
-			$this->getOutput()->addWikiMsg( 'checkuser-block-noreason' );
-			return;
-		}
-
-		[ $blockedUsers, $taggedUsers ] = $this->doMassUserBlockInternal(
-			$users,
-			$blockParams,
-			$this->opts->getValue( 'usetag' ),
-			$tag,
-			$this->opts->getValue( 'usettag' ),
-			$talkTag
-		);
-		$blockedCount = count( $blockedUsers );
-		$taggedCount = count( $taggedUsers );
-		$lang = $this->getLanguage();
-		if ( $blockedCount > 0 ) {
-			$this->getOutput()->addWikiMsg( 'checkuser-block-success',
-				$lang->listToText( $blockedUsers ),
-				$lang->formatNum( $blockedCount )
-			);
-		}
-		if ( $taggedCount > 0 ) {
-			$this->getOutput()->addWikiMsg( 'checkuser-block-success-tagged',
-				$lang->listToText( $taggedUsers ),
-				$lang->formatNum( $taggedCount )
-			);
-		}
-		if ( $blockedCount === 0 && $taggedCount === 0 ) {
-			$this->getOutput()->addWikiMsg( 'checkuser-block-failure' );
-		}
-	}
-
-	/**
-	 * Block a list of selected users
-	 *
-	 * @param string[] $users
-	 * @param array $blockParams
-	 * @param bool $useTag whether to perform the user page replacement
-	 * @param string $tag replace the user page with this content
-	 * @param bool $useTalkTag whether to perform the user talk page replacement
-	 * @param string $talkTag replace the user talk page this with content
-	 * @return string[][] List of html-safe usernames which were blocked at index 0 and tagged at index 1
-	 */
-	protected function doMassUserBlockInternal(
-		array $users,
-		array $blockParams,
-		bool $useTag = false,
-		string $tag = '',
-		bool $useTalkTag = false,
-		string $talkTag = ''
-	) {
-		$blockedUsers = [];
-		$taggedUsers = [];
-		foreach ( $users as $name ) {
-			$u = $this->userFactory->newFromName( $name, UserRigorOptions::RIGOR_NONE );
-			// Do some checks to make sure we can block this user first
-			if ( !$u ) {
-				// Invalid user
-				continue;
-			}
-			$isIP = IPUtils::isIPAddress( $u->getName() );
-			if ( !$u->getId() && !$isIP ) {
-				// Not a registered user or an IP
-				continue;
-			}
-
-			if (
-				!isset( $blockParams['email'] ) ||
-				$blockParams['email'] === false ||
-				$this->blockPermissionCheckerFactory
-					->newBlockPermissionChecker(
-						$u,
-						$this->getUser()
-					)
-					->checkEmailPermissions()
-			) {
-				$res = $this->blockUserFactory->newBlockUser(
-					$u,
-					$this->getAuthority(),
-					$isIP ? '1 week' : 'indefinite',
-					$blockParams['reason'],
-					[
-						'isCreateAccountBlocked' => true,
-						'isEmailBlocked' => $blockParams['email'] ?? false,
-						'isHardBlock' => !$isIP,
-						'isAutoblocking' => true,
-						'isUserTalkEditBlocked' => $blockParams['talk'] ?? false,
-					]
-				)->placeBlock( $blockParams['reblock'] );
-
-				if (
-					$res->isGood() ||
-					( $res->getStatusValue()->hasMessage( 'ipb_already_blocked' ) && $blockParams['reblock'] )
-				) {
-					// Mark as blocked and then attempt to tag if the block went through or
-					//  if reblock was enabled and there existed a block with the same parameters.
-					$userPage = $u->getUserPage();
-					$userText = "[[{$userPage->getPrefixedText()}|{$userPage->getText()}]]";
-
-					$blockedUsers[] = $userText;
-
-					if ( $useTag || $useTalkTag ) {
-						$userPageTagSuccess = true;
-						$userTalkPageTagSuccess = true;
-
-						// Tag user page and user talk page
-						if ( $useTag ) {
-							$userPageTagStatus = $this->tagPage(
-								$userPage,
-								$tag,
-								$blockParams['reason']
-							);
-							// Mark as a success if the edit went through or if the
-							//  content that was used is the same as what is already on
-							//  the page.
-							$userPageTagSuccess = $userPageTagStatus->isGood() ||
-								$userPageTagStatus->hasMessage( 'edit-no-change' );
-						}
-						if ( $useTalkTag ) {
-							$userTalkPageTagStatus = $this->tagPage(
-								$u->getTalkPage(),
-								$talkTag,
-								$blockParams['reason']
-							);
-							$userTalkPageTagSuccess = $userTalkPageTagStatus->isGood() ||
-								$userTalkPageTagStatus->hasMessage( 'edit-no-change' );
-						}
-						if ( $userPageTagSuccess && $userTalkPageTagSuccess ) {
-							// Only mark as tagged if all tags requested
-							//  for this user was successfully added
-							$taggedUsers[] = $userText;
-						}
-					}
-				}
-			}
-		}
-
-		return [ $blockedUsers, $taggedUsers ];
-	}
-
-	/**
-	 * Make an edit to the given page with the tag provided
-	 *
-	 * @param Title $title
-	 * @param string $tag
-	 * @param string $summary
-	 * @return Status the status of the edit to the $title
-	 */
-	protected function tagPage( Title $title, string $tag, string $summary ) {
-		// Check length to avoid mistakes
-		if ( strlen( $tag ) > 2 ) {
-			$page = $this->wikiPageFactory->newFromTitle( $title );
-			$flags = 0;
-			if ( $page->exists() ) {
-				$flags |= EDIT_MINOR;
-			}
-			return $page->doUserEditContent(
-				new WikitextContent( $tag ),
-				$this->getUser(),
-				$summary,
-				$flags
-			);
-		}
-		return Status::newFatal( 'checkuser-block-failure-tag-too-small' );
-	}
-
-	/**
 	 * Gets the pager for the specific check type.
 	 * Returns null if the checktype is not recognised.
 	 *
@@ -741,9 +505,10 @@ class SpecialCheckUser extends SpecialPage {
 					$this->dbProvider,
 					$this->getSpecialPageFactory(),
 					$this->userIdentityLookup,
-					$this->actorMigration,
 					$this->checkUserLogService,
-					$this->userFactory
+					$this->userFactory,
+					$this->checkUserLookupUtils,
+					$this->userOptionsLookup
 				);
 			case self::SUBTYPE_GET_USERS:
 				return new CheckUserGetUsersPager(
@@ -753,22 +518,22 @@ class SpecialCheckUser extends SpecialPage {
 					$logType,
 					$this->tokenQueryManager,
 					$this->permissionManager,
-					$this->blockPermissionCheckerFactory,
 					$this->userGroupManager,
 					$this->centralIdLookup,
 					$this->dbProvider,
 					$this->getSpecialPageFactory(),
 					$this->userIdentityLookup,
-					$this->actorMigration,
 					$this->userFactory,
 					$this->checkUserLogService,
+					$this->checkUserLookupUtils,
 					$this->userEditTracker,
 					$this->checkUserUtilityService,
 					$this->clientHintsLookup,
-					$this->clientHintsFormatter
+					$this->clientHintsFormatter,
+					$this->userOptionsLookup
 				);
-			case self::SUBTYPE_GET_EDITS:
-				return new CheckUserGetEditsPager(
+			case self::SUBTYPE_GET_ACTIONS:
+				return new CheckUserGetActionsPager(
 					$this->opts,
 					$userIdentity,
 					$xfor,
@@ -780,10 +545,8 @@ class SpecialCheckUser extends SpecialPage {
 					$this->dbProvider,
 					$this->getSpecialPageFactory(),
 					$this->userIdentityLookup,
-					$this->actorMigration,
 					$this->userFactory,
-					$this->revisionStore,
-					$this->archivedRevisionLookup,
+					$this->checkUserLookupUtils,
 					$this->checkUserLogService,
 					$this->commentFormatter,
 					$this->userEditTracker,
@@ -791,7 +554,9 @@ class SpecialCheckUser extends SpecialPage {
 					$this->checkUserUtilityService,
 					$this->commentStore,
 					$this->clientHintsLookup,
-					$this->clientHintsFormatter
+					$this->clientHintsFormatter,
+					$this->logFormatterFactory,
+					$this->userOptionsLookup
 				);
 			default:
 				return null;

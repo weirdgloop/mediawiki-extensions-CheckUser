@@ -2,41 +2,41 @@
 
 namespace MediaWiki\CheckUser\CheckUser\Pagers;
 
-use ActorMigration;
-use CentralIdLookup;
-use ExtensionRegistry;
-use Html;
 use HtmlArmor;
-use IContextSource;
 use LogicException;
-use MediaWiki\Block\AbstractBlock;
 use MediaWiki\Block\DatabaseBlock;
 use MediaWiki\CheckUser\CheckUser\CheckUserPagerNavigationBuilder;
 use MediaWiki\CheckUser\CheckUser\Widgets\HTMLFieldsetCheckUser;
 use MediaWiki\CheckUser\CheckUserQueryInterface;
+use MediaWiki\CheckUser\HookHandler\Preferences;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
+use MediaWiki\CheckUser\Services\CheckUserLookupUtils;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
-use MediaWiki\Extension\GlobalBlocking\GlobalBlocking;
+use MediaWiki\Context\IContextSource;
+use MediaWiki\Context\RequestContext;
+use MediaWiki\Extension\GlobalBlocking\GlobalBlockingServices;
 use MediaWiki\Extension\TorBlock\TorExitNodes;
 use MediaWiki\Html\FormOptions;
+use MediaWiki\Html\Html;
 use MediaWiki\Html\TemplateParser;
 use MediaWiki\Linker\LinkRenderer;
+use MediaWiki\MediaWikiServices;
 use MediaWiki\Navigation\PagerNavigationBuilder;
+use MediaWiki\Pager\RangeChronologicalPager;
+use MediaWiki\Registration\ExtensionRegistry;
+use MediaWiki\SpecialPage\SpecialPage;
 use MediaWiki\SpecialPage\SpecialPageFactory;
 use MediaWiki\Title\Title;
+use MediaWiki\Title\TitleValue;
+use MediaWiki\User\CentralId\CentralIdLookup;
+use MediaWiki\User\Options\UserOptionsLookup;
 use MediaWiki\User\UserFactory;
 use MediaWiki\User\UserGroupManager;
+use MediaWiki\User\UserGroupMembership;
 use MediaWiki\User\UserIdentity;
 use MediaWiki\User\UserIdentityLookup;
-use MWTimestamp;
-use RangeChronologicalPager;
-use RequestContext;
-use SpecialPage;
+use MediaWiki\Utils\MWTimestamp;
 use stdClass;
-use TitleValue;
-use UserGroupMembership;
-use Wikimedia\IPUtils;
-use Wikimedia\Rdbms\Database\DbQuoter;
 use Wikimedia\Rdbms\FakeResultWrapper;
 use Wikimedia\Rdbms\IConnectionProvider;
 use Wikimedia\Rdbms\IResultWrapper;
@@ -77,9 +77,6 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 
 	protected UserIdentity $target;
 
-	/** @var bool Should Special:CheckUser read from the new event tables. */
-	protected bool $eventTableReadNew;
-
 	/** @var bool Should Special:CheckUser display Client Hints data. */
 	protected bool $displayClientHints;
 
@@ -94,10 +91,11 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 	private TokenQueryManager $tokenQueryManager;
 	private SpecialPageFactory $specialPageFactory;
 	private UserIdentityLookup $userIdentityLookup;
-	private ActorMigration $actorMigration;
 	private CheckUserLogService $checkUserLogService;
 	protected TemplateParser $templateParser;
 	protected UserFactory $userFactory;
+	protected CheckUserLookupUtils $checkUserLookupUtils;
+	private UserOptionsLookup $userOptionsLookup;
 
 	/**
 	 * @param FormOptions $opts
@@ -109,9 +107,10 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 	 * @param IConnectionProvider $dbProvider
 	 * @param SpecialPageFactory $specialPageFactory
 	 * @param UserIdentityLookup $userIdentityLookup
-	 * @param ActorMigration $actorMigration
 	 * @param CheckUserLogService $checkUserLogService
 	 * @param UserFactory $userFactory
+	 * @param CheckUserLookupUtils $checkUserLookupUtils
+	 * @param UserOptionsLookup $userOptionsLookup
 	 * @param IContextSource|null $context
 	 * @param LinkRenderer|null $linkRenderer
 	 * @param ?int $limit
@@ -126,11 +125,12 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 		IConnectionProvider $dbProvider,
 		SpecialPageFactory $specialPageFactory,
 		UserIdentityLookup $userIdentityLookup,
-		ActorMigration $actorMigration,
 		CheckUserLogService $checkUserLogService,
 		UserFactory $userFactory,
-		IContextSource $context = null,
-		LinkRenderer $linkRenderer = null,
+		CheckUserLookupUtils $checkUserLookupUtils,
+		UserOptionsLookup $userOptionsLookup,
+		?IContextSource $context = null,
+		?LinkRenderer $linkRenderer = null,
 		?int $limit = null
 	) {
 		$this->opts = $opts;
@@ -162,9 +162,6 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 
 		$this->mLimitsShown = array_map( 'ceil', $this->mLimitsShown );
 		$this->mLimitsShown = array_unique( $this->mLimitsShown );
-		$this->eventTableReadNew = boolval(
-			$this->getConfig()->get( 'CheckUserEventTablesMigrationStage' ) & SCHEMA_COMPAT_READ_NEW
-		);
 		$this->displayClientHints = $this->getConfig()->get( 'CheckUserDisplayClientHints' );
 
 		$this->userGroupManager = $userGroupManager;
@@ -172,9 +169,10 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 		$this->tokenQueryManager = $tokenQueryManager;
 		$this->specialPageFactory = $specialPageFactory;
 		$this->userIdentityLookup = $userIdentityLookup;
-		$this->actorMigration = $actorMigration;
 		$this->checkUserLogService = $checkUserLogService;
 		$this->userFactory = $userFactory;
+		$this->checkUserLookupUtils = $checkUserLookupUtils;
+		$this->userOptionsLookup = $userOptionsLookup;
 
 		$this->templateParser = new TemplateParser( __DIR__ . '/../../../templates' );
 
@@ -334,28 +332,23 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 			// target is a user or an IP. If the target is a XFF then skip this.
 			$user = $this->userIdentityLookup->getUserIdentityByName( $this->target->getName() );
 
-			$lastEdit = false;
-
-			$revWhere = $this->actorMigration->getWhere( $this->mDb, 'rev_user', $user );
-			foreach ( $revWhere['orconds'] as $cond ) {
-				$lastEdit = max( $lastEdit, $this->mDb->newSelectQueryBuilder()
-					->tables( [ 'revision' ] + $revWhere['tables'] )
-					->field( 'rev_timestamp' )
-					->conds( $cond )
+			$lastEdit = max(
+				$this->mDb->newSelectQueryBuilder()
+					->select( 'rev_timestamp' )
+					->from( 'revision' )
+					->where( [ 'actor_name' => $this->target->getName() ] )
+					->join( 'actor', null, 'actor_id = rev_actor' )
 					->orderBy( 'rev_timestamp', SelectQueryBuilder::SORT_DESC )
-					->joinConds( $revWhere['joins'] )
+					->caller( __METHOD__ )
+					->fetchField(),
+				$this->mDb->newSelectQueryBuilder()
+					->table( 'logging' )
+					->field( 'log_timestamp' )
+					->orderBy( 'log_timestamp', SelectQueryBuilder::SORT_DESC )
+					->join( 'actor', null, 'actor_id=log_actor' )
+					->where( [ 'actor_name' => $this->target->getName() ] )
 					->caller( __METHOD__ )
 					->fetchField()
-				);
-			}
-			$lastEdit = max( $lastEdit, $this->mDb->newSelectQueryBuilder()
-				->table( 'logging' )
-				->field( 'log_timestamp' )
-				->orderBy( 'log_timestamp', SelectQueryBuilder::SORT_DESC )
-				->join( 'actor', null, 'actor_id=log_actor' )
-				->where( [ 'actor_name' => $this->target->getName() ] )
-				->caller( __METHOD__ )
-				->fetchField()
 			);
 
 			if ( $lastEdit ) {
@@ -379,31 +372,34 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 	 */
 	protected function userBlockFlags( string $ip, UserIdentity $user ): array {
 		$flags = [];
-		// Needed because User::isBlockedGlobally doesn't seem to have a non User:: method.
-		$userObj = $this->userFactory->newFromUserIdentity( $user );
 
+		// Generate the block flag. Only one will be displayed, with the order of priority being local block, then
+		// global block, then tor exit node block, and finally the account having been previously blocked.
 		$block = DatabaseBlock::newFromTarget( $user, $ip );
 		if ( $block instanceof DatabaseBlock ) {
 			// Locally blocked
 			$flags[] = $this->getBlockFlag( $block );
-		} elseif (
-			$ip == $user->getName() &&
-			ExtensionRegistry::getInstance()->isLoaded( 'GlobalBlocking' ) &&
-			GlobalBlocking::getUserBlock(
-				$this->userFactory->newFromUserIdentity( $user ),
-				$ip
-			) instanceof AbstractBlock
-		) {
-			// Globally blocked IP
-			$flags[] = '<strong>(' . $this->msg( 'checkuser-gblocked' )->escaped() . ')</strong>';
-		} elseif (
+		} elseif ( ExtensionRegistry::getInstance()->isLoaded( 'GlobalBlocking' ) ) {
+			$globalBlockLookup = GlobalBlockingServices::wrap( MediaWikiServices::getInstance() )
+				->getGlobalBlockLookup();
+			$globalBlock = $globalBlockLookup->getGlobalBlockingBlock(
+				$ip ?: null, $this->centralIdLookup->centralIdFromLocalUser( $user )
+			);
+			if ( $globalBlock !== null ) {
+				// Globally blocked IP or user
+				$flags[] = '<strong>(' . $this->msg( 'checkuser-gblocked' )->escaped() . ')</strong>';
+			}
+		}
+
+		if (
+			!count( $flags ) &&
 			$ip == $user->getName() &&
 			ExtensionRegistry::getInstance()->isLoaded( 'TorBlock' ) &&
 			TorExitNodes::isExitNode( $ip )
 		) {
 			// Tor exit node
 			$flags[] = Html::rawElement( 'strong', [], '(' . $this->msg( 'checkuser-torexitnode' )->escaped() . ')' );
-		} elseif ( $this->userWasBlocked( $user->getName() ) ) {
+		} elseif ( !count( $flags ) && $this->userWasBlocked( $user->getName() ) ) {
 			// Previously blocked
 			$blocklog = $this->getLinkRenderer()->makeKnownLink(
 				SpecialPage::getTitleFor( 'Log' ),
@@ -431,7 +427,7 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 		}
 		// Check for extra user rights...
 		if ( $user->getId() ) {
-			if ( $userObj->isLocked() ) {
+			if ( $this->userFactory->newFromUserIdentity( $user )->isLocked() ) {
 				$flags[] = Html::rawElement(
 					'strong',
 					[ 'class' => 'mw-changeslist-links' ],
@@ -486,89 +482,6 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 			->useIndex( 'log_page_time' )
 			->caller( __METHOD__ )
 			->fetchField();
-	}
-
-	/**
-	 * @param string $target an IP address or CIDR range
-	 * @return bool
-	 */
-	public static function isValidRange( string $target ): bool {
-		$CIDRLimit = RequestContext::getMain()->getConfig()->get( 'CheckUserCIDRLimit' );
-		if ( IPUtils::isValidRange( $target ) ) {
-			[ $ip, $range ] = explode( '/', $target, 2 );
-			return !(
-				( IPUtils::isIPv4( $ip ) && $range < $CIDRLimit['IPv4'] ) ||
-				( IPUtils::isIPv6( $ip ) && $range < $CIDRLimit['IPv6'] )
-			);
-		}
-
-		return IPUtils::isValid( $target );
-	}
-
-	/**
-	 * Get the WHERE conditions for an IP address / range, optionally as a XFF.
-	 *
-	 * @param DbQuoter $quoter A DB quoter, which can be a IReadableDatabase instance if convenient.
-	 * @param string $target an IP address or CIDR range
-	 * @param bool $xfor True if searching on XFF IPs by IP address / range
-	 * @param string $table The table which will be used in the query these WHERE conditions
-	 * are used (array of valid options in self::RESULT_TABLES).
-	 * @return array|false array for valid conditions, false if invalid
-	 */
-	public static function getIpConds(
-		DbQuoter $quoter, string $target, bool $xfor = false, string $table = self::CHANGES_TABLE
-	) {
-		$columnName = self::getIpHexColumn( $xfor, $table );
-
-		if ( !self::isValidRange( $target ) ) {
-			return false;
-		}
-
-		if ( IPUtils::isValidRange( $target ) ) {
-			[ $start, $end ] = IPUtils::parseRange( $target );
-			return [ $columnName . ' BETWEEN ' . $quoter->addQuotes( $start ) .
-				' AND ' . $quoter->addQuotes( $end ) ];
-		} elseif ( IPUtils::isValid( $target ) ) {
-			return [ $columnName => IPUtils::toHex( $target ) ];
-		}
-		// invalid IP
-		return false;
-	}
-
-	/**
-	 * Gets the column name for the IP hex column based
-	 * on the value for $xfor and a given $table.
-	 *
-	 * @param bool $xfor Whether the IPs being searched through are XFF IPs.
-	 * @param string $table The table selecting results from (array of valid
-	 * options in self::RESULT_TABLES).
-	 * @return string
-	 */
-	private static function getIpHexColumn( bool $xfor, string $table ): string {
-		$type = $xfor ? 'xff' : 'ip';
-		return self::RESULT_TABLE_TO_PREFIX[$table] . $type . '_hex';
-	}
-
-	/**
-	 * Gets the name for the index for a given table.
-	 *
-	 * note: When SCHEMA_COMPAT_READ_NEW is set, the query will not use an index
-	 * on the values of `cuc_only_for_read_old`.
-	 * That shouldn't result in a significant performance drop, and this is a
-	 * temporary situation until the temporary column is removed after the
-	 * migration is complete.
-	 *
-	 * @param string $table The table this index should apply to (list of valid options
-	 *   in self::RESULT_TABLES).
-	 * @return string
-	 */
-	protected function getIndexName( string $table ): string {
-		if ( $this->xfor === null ) {
-			return self::RESULT_TABLE_TO_PREFIX[$table] . 'actor_ip_time';
-		} else {
-			$type = $this->xfor ? 'xff' : 'ip';
-			return self::RESULT_TABLE_TO_PREFIX[$table] . $type . '_hex_time';
-		}
 	}
 
 	/** @inheritDoc */
@@ -650,9 +563,21 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 		if ( !$this->mResult->numRows() ) {
 			return null;
 		}
-		$collapseByDefault = $this->getConfig()->get( 'CheckUserCollapseCheckUserHelperByDefault' );
-		if ( is_int( $collapseByDefault ) ) {
+		$collapseByDefault = $this->userOptionsLookup
+			->getOption( $this->getUser(), 'checkuser-helper-table-collapse-by-default' );
+		if ( is_numeric( $collapseByDefault ) ) {
 			$collapseByDefault = $this->mResult->numRows() > $collapseByDefault;
+		} elseif ( $collapseByDefault === Preferences::CHECKUSER_HELPER_ALWAYS_COLLAPSE_BY_DEFAULT ) {
+			$collapseByDefault = true;
+		} elseif ( $collapseByDefault === Preferences::CHECKUSER_HELPER_NEVER_COLLAPSE_BY_DEFAULT ) {
+			$collapseByDefault = false;
+		} else {
+			// For Preferences::CHECKUSER_HELPER_USE_CONFIG_TO_COLLAPSE_BY_DEFAULT or any other value,
+			// use the value from the site config.
+			$collapseByDefault = $this->getConfig()->get( 'CheckUserCollapseCheckUserHelperByDefault' );
+			if ( is_int( $collapseByDefault ) ) {
+				$collapseByDefault = $this->mResult->numRows() > $collapseByDefault;
+			}
 		}
 		$fieldset = new HTMLFieldsetCheckUser( [], $this->getContext() );
 		$fieldset->outerClass = 'mw-checkuser-helper-fieldset';
@@ -685,7 +610,7 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 	 * @inheritDoc
 	 *
 	 * @param string|null $table One of the tables in CheckUserQueryInterface::RESULT_TABLES.
-	 *   If set to null, this will throw an LogicException.
+	 *   If set to null, this will throw a LogicException.
 	 * @throws LogicException if $table is null a LogicException is thrown as ::getQueryInfo
 	 * must have this information to return the correct query info.
 	 */
@@ -767,7 +692,14 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 
 			$results = array_merge(
 				$results,
-				iterator_to_array( $this->mDb->select( $tables, $fields, $conds, $fname, $options, $join_conds ) )
+				iterator_to_array( $this->mDb->newSelectQueryBuilder()
+					->tables( $tables )
+					->fields( $fields )
+					->conds( $conds )
+					->caller( $fname )
+					->options( $options )
+					->joinConds( $join_conds )
+					->fetchResultSet() )
 			);
 		}
 		$results = $this->groupResultsByIndexField( $results );
@@ -808,12 +740,7 @@ abstract class AbstractCheckUserPager extends RangeChronologicalPager implements
 		// Copied, with modification, from IndexPager::buildQueryInfo
 		$fname = __METHOD__ . ' (' . $this->getSqlComment() . ')';
 		$queryInfo = [];
-		// Select data from all three tables when reading new, and only cu_changes when reading old.
-		$resultTables = self::RESULT_TABLES;
-		if ( $this->getConfig()->get( 'CheckUserEventTablesMigrationStage' ) & SCHEMA_COMPAT_READ_OLD ) {
-			$resultTables = [ self::CHANGES_TABLE ];
-		}
-		foreach ( $resultTables as $table ) {
+		foreach ( self::RESULT_TABLES as $table ) {
 			$info = $this->getQueryInfo( $table );
 			$tables = $info['tables'];
 			$fields = $info['fields'];

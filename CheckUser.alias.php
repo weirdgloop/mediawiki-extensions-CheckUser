@@ -12,8 +12,10 @@ $specialPageAliases = [];
 $specialPageAliases['en'] = [
 	'CheckUser' => [ 'CheckUser' ],
 	'CheckUserLog' => [ 'CheckUserLog' ],
+	'GlobalContributions' => [ 'GlobalContributions' ],
 	'Investigate' => [ 'Investigate' ],
 	'InvestigateBlock' => [ 'InvestigateBlock' ],
+	'IPContributions' => [ 'IPContributions' ],
 ];
 
 /** Arabic (العربية) */
@@ -339,6 +341,9 @@ $specialPageAliases['myv'] = [
 $specialPageAliases['nb'] = [
 	'CheckUser' => [ 'IP-sjekk' ],
 	'CheckUserLog' => [ 'IP-sjekkingslogg' ],
+	'Investigate' => [ 'Undersøk' ],
+	'InvestigateBlock' => [ 'Undersøkelsesblokkering' ],
+	'IPContributions' => [ 'IP-bidrag' ],
 ];
 
 /** Low Saxon (Netherlands) (Nedersaksies) */
@@ -351,6 +356,15 @@ $specialPageAliases['nds-nl'] = [
 $specialPageAliases['nl'] = [
 	'CheckUser' => [ 'GebruikerControleren' ],
 	'CheckUserLog' => [ 'LogboekGebruikerControleren' ],
+];
+
+/** Norwegian Nynorsk (norsk nynorsk) */
+$specialPageAliases['nn'] = [
+	'CheckUser' => [ 'IP-sjekk' ],
+	'CheckUserLog' => [ 'IP-sjekkingslogg' ],
+	'Investigate' => [ 'Undersøk' ],
+	'InvestigateBlock' => [ 'Undersøkingsblokkering' ],
+	'IPContributions' => [ 'IP-bidrag' ],
 ];
 
 /** Occitan (occitan) */

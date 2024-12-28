@@ -1,5 +1,6 @@
 <?php
 
+use MediaWiki\CheckUser\GlobalContributions\GlobalContributionsPagerFactory;
 use MediaWiki\CheckUser\GuidedTour\TourLauncher;
 use MediaWiki\CheckUser\Hook\HookRunner;
 use MediaWiki\CheckUser\Investigate\Pagers\ComparePagerFactory;
@@ -11,8 +12,16 @@ use MediaWiki\CheckUser\Investigate\Services\PreliminaryCheckService;
 use MediaWiki\CheckUser\Investigate\Services\TimelineService;
 use MediaWiki\CheckUser\Investigate\Utilities\DurationManager;
 use MediaWiki\CheckUser\Investigate\Utilities\EventLogger;
+use MediaWiki\CheckUser\IPContributions\IPContributionsPagerFactory;
 use MediaWiki\CheckUser\Logging\TemporaryAccountLoggerFactory;
+use MediaWiki\CheckUser\Services\AccountCreationDetailsLookup;
+use MediaWiki\CheckUser\Services\ApiQueryCheckUserResponseFactory;
+use MediaWiki\CheckUser\Services\CheckUserCentralIndexManager;
+use MediaWiki\CheckUser\Services\CheckUserDataPurger;
+use MediaWiki\CheckUser\Services\CheckUserInsert;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
+use MediaWiki\CheckUser\Services\CheckUserLookupUtils;
+use MediaWiki\CheckUser\Services\CheckUserTemporaryAccountsByIPLookup;
 use MediaWiki\CheckUser\Services\CheckUserUtilityService;
 use MediaWiki\CheckUser\Services\TokenManager;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
@@ -20,8 +29,11 @@ use MediaWiki\CheckUser\Services\UserAgentClientHintsFormatter;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsLookup;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
 use MediaWiki\Config\ServiceOptions;
+use MediaWiki\Context\DerivativeContext;
+use MediaWiki\Context\RequestContext;
 use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Registration\ExtensionRegistry;
 use MediaWiki\WikiMap\WikiMap;
 
 // PHP unit does not understand code coverage for this file
@@ -38,7 +50,8 @@ return [
 			$services->getCommentStore(),
 			$services->getCommentFormatter(),
 			LoggerFactory::getInstance( 'CheckUser' ),
-			$services->getActorStore()
+			$services->getActorStore(),
+			$services->getUserIdentityLookup()
 		);
 	},
 	'CheckUserPreliminaryCheckService' => static function (
@@ -48,6 +61,7 @@ return [
 			$services->getDBLoadBalancerFactory(),
 			ExtensionRegistry::getInstance(),
 			$services->getUserGroupManagerFactory(),
+			$services->getDatabaseBlockStoreFactory(),
 			WikiMap::getCurrentWikiDbDomain()->getId()
 		);
 	},
@@ -58,13 +72,15 @@ return [
 				$services->getMainConfig()
 			),
 			$services->getDBLoadBalancerFactory(),
-			$services->getUserIdentityLookup()
+			$services->getUserIdentityLookup(),
+			$services->get( 'CheckUserLookupUtils' )
 		);
 	},
 	'CheckUserTimelineService' => static function ( MediaWikiServices $services ): TimelineService {
 		return new TimelineService(
 			$services->getDBLoadBalancerFactory(),
-			$services->getUserIdentityLookup()
+			$services->getUserIdentityLookup(),
+			$services->get( 'CheckUserLookupUtils' )
 		);
 	},
 	'CheckUserTokenManager' => static function ( MediaWikiServices $services ): TokenManager {
@@ -92,7 +108,7 @@ return [
 		return new PreliminaryCheckPagerFactory(
 			$services->getLinkRenderer(),
 			$services->getNamespaceInfo(),
-			\ExtensionRegistry::getInstance(),
+			ExtensionRegistry::getInstance(),
 			$services->get( 'CheckUserTokenQueryManager' ),
 			$services->get( 'CheckUserPreliminaryCheckService' ),
 			$services->getUserFactory()
@@ -112,12 +128,13 @@ return [
 	): TimelineRowFormatterFactory {
 		return new TimelineRowFormatterFactory(
 			$services->getLinkRenderer(),
-			$services->getRevisionStore(),
-			$services->getArchivedRevisionLookup(),
+			$services->get( 'CheckUserLookupUtils' ),
 			$services->getTitleFormatter(),
 			$services->getSpecialPageFactory(),
 			$services->getCommentFormatter(),
-			$services->getUserFactory()
+			$services->getUserFactory(),
+			$services->getCommentStore(),
+			$services->getLogFormatterFactory()
 		);
 	},
 	'CheckUserTimelinePagerFactory' => static function (
@@ -133,11 +150,44 @@ return [
 			LoggerFactory::getInstance( 'CheckUser' )
 		);
 	},
+	'CheckUserIPContributionsPagerFactory' => static function (
+		MediaWikiServices $services
+	): IPContributionsPagerFactory {
+		return new IPContributionsPagerFactory(
+			$services->getLinkRenderer(),
+			$services->getLinkBatchFactory(),
+			$services->getHookContainer(),
+			$services->getRevisionStore(),
+			$services->getNamespaceInfo(),
+			$services->getCommentFormatter(),
+			$services->getUserFactory(),
+			$services->getTempUserConfig(),
+			$services->get( 'CheckUserLookupUtils' ),
+			$services->getJobQueueGroup()
+		);
+	},
+	'CheckUserGlobalContributionsPagerFactory' => static function (
+		MediaWikiServices $services
+	): GlobalContributionsPagerFactory {
+		return new GlobalContributionsPagerFactory(
+			$services->getLinkRenderer(),
+			$services->getLinkBatchFactory(),
+			$services->getHookContainer(),
+			$services->getRevisionStore(),
+			$services->getNamespaceInfo(),
+			$services->getCommentFormatter(),
+			$services->getUserFactory(),
+			$services->getTempUserConfig(),
+			$services->get( 'CheckUserLookupUtils' ),
+			$services->getDBLoadBalancerFactory(),
+			$services->getJobQueueGroup()
+		);
+	},
 	'CheckUserEventLogger' => static function (
 		 MediaWikiServices $services
 	): EventLogger {
 		return new EventLogger(
-			\ExtensionRegistry::getInstance()
+			ExtensionRegistry::getInstance()
 		);
 	},
 	'CheckUserHookRunner' => static function (
@@ -153,6 +203,54 @@ return [
 		return new CheckUserUtilityService(
 			$services->getProxyLookup(),
 			$services->getMainConfig()->get( 'UsePrivateIPs' )
+		);
+	},
+	'CheckUserLookupUtils' => static function (
+		MediaWikiServices $services
+	): CheckUserLookupUtils {
+		return new CheckUserLookupUtils(
+			new ServiceOptions(
+				CheckUserLookupUtils::CONSTRUCTOR_OPTIONS,
+				$services->getMainConfig()
+			),
+			$services->getDBLoadBalancerFactory(),
+			$services->getRevisionStore(),
+			$services->getArchivedRevisionLookup(),
+			LoggerFactory::getInstance( 'CheckUser' )
+		);
+	},
+	'CheckUserInsert' => static function (
+		MediaWikiServices $services
+	): CheckUserInsert {
+		return new CheckUserInsert(
+			$services->getActorStore(),
+			$services->get( 'CheckUserUtilityService' ),
+			$services->getCommentStore(),
+			$services->getHookContainer(),
+			$services->getDBLoadBalancerFactory(),
+			$services->getContentLanguage(),
+			$services->getTempUserConfig(),
+			$services->get( 'CheckUserCentralIndexManager' )
+		);
+	},
+	'CheckUserDataPurger' => static function () {
+		return new CheckUserDataPurger();
+	},
+	'CheckUserCentralIndexManager' => static function (
+		MediaWikiServices $services
+	) {
+		return new CheckUserCentralIndexManager(
+			new ServiceOptions(
+				CheckUserCentralIndexManager::CONSTRUCTOR_OPTIONS,
+				$services->getMainConfig()
+			),
+			$services->getDBLoadBalancerFactory(),
+			$services->getCentralIdLookup(),
+			$services->getUserGroupManager(),
+			$services->getJobQueueGroup(),
+			$services->getTempUserConfig(),
+			$services->getUserFactory(),
+			LoggerFactory::getInstance( 'CheckUser' )
 		);
 	},
 	'CheckUserTemporaryAccountLoggerFactory' => static function (
@@ -195,5 +293,46 @@ return [
 			)
 		);
 	},
+	'ApiQueryCheckUserResponseFactory' => static function (
+		MediaWikiServices $services
+	): ApiQueryCheckUserResponseFactory {
+		return new ApiQueryCheckUserResponseFactory(
+			$services->getDBLoadBalancerFactory(),
+			$services->getMainConfig(),
+			RequestContext::getMain(),
+			$services->get( 'CheckUserLogService' ),
+			$services->getUserNameUtils(),
+			$services->get( 'CheckUserLookupUtils' ),
+			$services->getUserIdentityLookup(),
+			$services->getCommentStore(),
+			$services->getRevisionStore(),
+			$services->getArchivedRevisionLookup(),
+			$services->getUserFactory(),
+			$services->getLogFormatterFactory()
+		);
+	},
+	'AccountCreationDetailsLookup' => static function (
+		MediaWikiServices $services
+	): AccountCreationDetailsLookup {
+		return new AccountCreationDetailsLookup(
+			LoggerFactory::getInstance( 'CheckUser' )
+		);
+	},
+	'CheckUserTemporaryAccountsByIPLookup' => static function (
+		MediaWikiServices $services
+	): CheckUserTemporaryAccountsByIPLookup {
+		return new CheckUserTemporaryAccountsByIPLookup(
+			new ServiceOptions(
+				CheckUserTemporaryAccountsByIPLookup::CONSTRUCTOR_OPTIONS,
+				$services->getMainConfig()
+			),
+			$services->getDBLoadBalancerFactory(),
+			$services->getJobQueueGroup(),
+			$services->getTempUserConfig(),
+			$services->getUserFactory(),
+			$services->getPermissionManager(),
+			$services->getUserOptionsLookup()
+		);
+	}
 ];
 // @codeCoverageIgnoreEnd

@@ -3,10 +3,9 @@
 namespace MediaWiki\CheckUser\Test\Integration\Logging;
 
 use LogFormatterTestCase;
+use MediaWiki\Context\RequestContext;
 use MediaWiki\MainConfigNames;
-use MediaWiki\MediaWikiServices;
 use MediaWiki\Tests\Unit\Permissions\MockAuthorityTrait;
-use RequestContext;
 
 /**
  * @group CheckUser
@@ -16,19 +15,9 @@ use RequestContext;
  */
 class CheckUserPrivateEventLogFormatterTest extends LogFormatterTestCase {
 
-	protected function setUp(): void {
-		parent::setUp();
-
-		$this->tablesUsed = array_merge(
-			$this->tablesUsed,
-			[ 'ipblocks' ]
-		);
-	}
-
 	use MockAuthorityTrait;
 
 	public static function provideLogDatabaseRows(): array {
-		$wikiName = MediaWikiServices::getInstance()->getMainConfig()->get( MainConfigNames::Sitename );
 		return [
 			'Successful login' => [
 				'row' => [
@@ -40,7 +29,7 @@ class CheckUserPrivateEventLogFormatterTest extends LogFormatterTestCase {
 					],
 				],
 				'extra' => [
-					'text' => "Successfully logged in to $wikiName as UTSysop",
+					'text' => "Successfully logged in to mediawiki as UTSysop",
 					'api' => [
 						'target' => 'UTSysop',
 					],
@@ -56,7 +45,7 @@ class CheckUserPrivateEventLogFormatterTest extends LogFormatterTestCase {
 					],
 				],
 				'extra' => [
-					'text' => "Failed to log in to $wikiName as UTSysop",
+					'text' => "Failed to log in to mediawiki as UTSysop",
 					'api' => [
 						'target' => 'UTSysop',
 					],
@@ -72,7 +61,7 @@ class CheckUserPrivateEventLogFormatterTest extends LogFormatterTestCase {
 					],
 				],
 				'extra' => [
-					'text' => "Failed to log in to $wikiName as UTSysop but had the correct password",
+					'text' => "Failed to log in to mediawiki as UTSysop but had the correct password",
 					'api' => [
 						'target' => 'UTSysop',
 					],
@@ -156,11 +145,11 @@ class CheckUserPrivateEventLogFormatterTest extends LogFormatterTestCase {
 					],
 				],
 				'extra' => [
-					# The testcase removes the HTML from the actual actiontext
-					# as the message is parsed.
+					// The testcase removes the HTML from the actual actiontext
+					// as the message is parsed.
 					'text' => 'Test plaintext action text test',
 					'api' => [
-						# Link is still present for the API, as API responses don't parse wikitext.
+						// Link is still present for the API, as API responses don't parse wikitext.
 						'actiontext' => 'Test plaintext action text [[test]]'
 					]
 				]
@@ -172,67 +161,79 @@ class CheckUserPrivateEventLogFormatterTest extends LogFormatterTestCase {
 	 * @dataProvider provideLogDatabaseRows
 	 */
 	public function testLogDatabaseRows( $row, $extra ) {
+		// Override wgSitename for the test to 'mediawiki' as the data provider
+		// uses this value for the value of {{SITENAME}}.
+		$this->overrideConfigValue( MainConfigNames::Sitename, 'mediawiki' );
 		$this->doTestLogFormatter( $row, $extra, [ 'checkuser' ] );
 	}
 
-	public function testLogDatabaseRowsForHiddenUserAndAuthorityHasSuppressGroup() {
-		$testUser = $this->getMutableTestUser()->getUser();
-		$this->getServiceContainer()->getBlockUserFactory()->newBlockUser(
-			$testUser,
-			$this->mockRegisteredUltimateAuthority(),
-			'infinity',
-			'block to hide the test user',
-			[ 'isHideUser' => true ]
-		)->placeBlock();
-		$testUser->invalidateCache();
+	public static function provideLogDatabaseRowsForHiddenUser() {
+		return [
+			'User does not have suppress group' => [ false ],
+			'User has suppress group' => [ true ]
+		];
+	}
+
+	/**
+	 * @dataProvider provideLogDatabaseRowsForHiddenUser
+	 * @param bool $logViewerHasSuppress
+	 */
+	public function testLogDatabaseRowsForHiddenUser( $logViewerHasSuppress ) {
+		$targetUser = $this->getMutableTestUser()->getUser();
+		$blockingUser = $this->getMutableTestUser( [ 'sysop', 'suppress' ] )->getUser();
+		$logViewGroups = [ 'checkuser' ];
+		if ( $logViewerHasSuppress ) {
+			$logViewGroups[] = 'suppress';
+		}
+		$logViewUser = $this->getMutableTestUser( $logViewGroups )->getUser();
+		$blockStatus = $this->getServiceContainer()->getBlockUserFactory()
+			->newBlockUser(
+				$targetUser,
+				$blockingUser,
+				'infinity',
+				'block to hide the test user',
+				[ 'isHideUser' => true ]
+			)->placeBlock();
+		$this->assertStatusGood( $blockStatus );
 		$wikiName = $this->getServiceContainer()->getMainConfig()->get( MainConfigNames::Sitename );
-		$this->doTestLogFormatter(
+
+		if ( $logViewerHasSuppress ) {
+			$expectedName = $targetUser->getName();
+		} else {
+			$expectedName = RequestContext::getMain()->msg( 'rev-deleted-user' )->text();
+		}
+
+		// Don't use doTestLogFormatter() since it overrides every service that
+		// accesses the database and prevents correct loading of the block.
+		$row = $this->expandDatabaseRow(
 			[
 				'type' => 'checkuser-private-event',
 				'action' => 'login-success',
-				'user_text' => $testUser->getName(),
+				'user_text' => $targetUser->getName(),
 				'params' => [
-					'4::target' => $testUser->getName(),
+					'4::target' => $targetUser->getName(),
 				],
 			],
+			false
+		);
+		$formatter = $this->getServiceContainer()->getLogFormatterFactory()->newFromRow( $row );
+		$formatter->context->setAuthority( $logViewUser );
+		$this->assertEquals(
+			"Successfully logged in to $wikiName as $expectedName",
+			strip_tags( $formatter->getActionText() ),
+			'Action text is equal to expected text'
+		);
+
+		$api = $formatter->formatParametersForApi();
+		unset( $api['_element'] );
+		unset( $api['_type'] );
+		$this->assertSame(
 			[
-				'text' => "Successfully logged in to $wikiName as {$testUser->getName()}",
-				'api' => [
-					'target' => $testUser->getName(),
-				],
+				'target' => $expectedName,
 			],
-			[ 'checkuser', 'suppress' ]
+			$api,
+			'Api log params is equal to expected array'
 		);
 	}
 
-	public function testLogDatabaseRowsForHiddenUser() {
-		$testUser = $this->getMutableTestUser()->getUser();
-		$this->getServiceContainer()->getBlockUserFactory()->newBlockUser(
-			$testUser,
-			$this->mockRegisteredUltimateAuthority(),
-			'infinity',
-			'block to hide the test user',
-			[ 'isHideUser' => true ]
-		)->placeBlock();
-		$testUser->invalidateCache();
-		$wikiName = $this->getServiceContainer()->getMainConfig()->get( MainConfigNames::Sitename );
-		$usernameRemovedMessageText = RequestContext::getMain()->msg( 'rev-deleted-user' )->text();
-		$this->doTestLogFormatter(
-			[
-				'type' => 'checkuser-private-event',
-				'action' => 'login-success',
-				'user_text' => $testUser->getName(),
-				'params' => [
-					'4::target' => $testUser->getName(),
-				],
-			],
-			[
-				'text' => "Successfully logged in to $wikiName as $usernameRemovedMessageText",
-				'api' => [
-					'target' => $usernameRemovedMessageText,
-				],
-			],
-			[ 'checkuser' ]
-		);
-	}
 }

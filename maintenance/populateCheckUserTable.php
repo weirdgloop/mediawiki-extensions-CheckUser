@@ -3,8 +3,7 @@
 namespace MediaWiki\CheckUser\Maintenance;
 
 use DatabaseLogEntry;
-use LoggedUpdateMaintenance;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Maintenance\LoggedUpdateMaintenance;
 use RecentChange;
 use Wikimedia\IPUtils;
 
@@ -15,15 +14,16 @@ if ( $IP === false ) {
 require_once "$IP/maintenance/Maintenance.php";
 
 /**
- * Populate the cu_changes table needed for CheckUser queries with
+ * Populate the CheckUser result tables needed for CheckUser queries with
  * data from recent changes.
+ *
  * This is automatically run during first installation within update.php
  * but --force parameter should be set if you want to manually run thereafter.
  */
 class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 	public function __construct() {
 		parent::__construct();
-		$this->addDescription( 'Populate `cu_changes` table with entries from recentchanges' );
+		$this->addDescription( 'Populate CheckUser result tables with entries from recentchanges' );
 		$this->addOption( 'cutoff', 'Cut-off time for rc_timestamp' );
 		$this->setBatchSize( 100 );
 
@@ -41,7 +41,7 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 	 * @inheritDoc
 	 */
 	protected function doDBUpdates() {
-		$db = $this->getDB( DB_PRIMARY );
+		$db = $this->getPrimaryDB();
 
 		// Check if the table is empty
 		$rcRows = $db->newSelectQueryBuilder()
@@ -56,16 +56,15 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 		$cutoff = $this->getOption( 'cutoff' );
 		if ( $cutoff ) {
 			// Something leftover... clear old entries to minimize dupes
-			$cutoff = wfTimestamp( TS_MW, $cutoff );
-			$encCutoff = $db->addQuotes( $db->timestamp( $cutoff ) );
-			$db->delete(
-				'cu_changes',
-				[ "cuc_timestamp < $encCutoff" ],
-				__METHOD__
-			);
-			$cutoffCond = "AND rc_timestamp < $encCutoff";
+			$cutoff = $db->timestamp( $cutoff );
+			$db->newDeleteQueryBuilder()
+				->deleteFrom( 'cu_changes' )
+				->where( $db->expr( 'cuc_timestamp', '<', $cutoff ) )
+				->caller( __METHOD__ )
+				->execute();
+			$cutoffCond = $db->expr( 'rc_timestamp', '<', $cutoff );
 		} else {
-			$cutoffCond = "";
+			$cutoffCond = null;
 		}
 
 		$start = (int)$db->newSelectQueryBuilder()
@@ -87,32 +86,31 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 			"Starting population of cu_changes with recentchanges rc_id from $start to $end.\n"
 		);
 
-		$services = MediaWikiServices::getInstance();
-		$lbFactory = $services->getDBLoadBalancerFactory();
+		$services = $this->getServiceContainer();
 		$commentStore = $services->getCommentStore();
 		$rcQuery = RecentChange::getQueryInfo();
 
 		while ( $blockStart <= $end ) {
 			$this->output( "...migrating rc_id from $blockStart to $blockEnd\n" );
-			$cond = "rc_id BETWEEN $blockStart AND $blockEnd $cutoffCond";
-			$res = $db->newSelectQueryBuilder()
+			$queryBuilder = $db->newSelectQueryBuilder()
 				->fields( $rcQuery['fields'] )
 				->tables( $rcQuery['tables'] )
 				->joinConds( $rcQuery['joins'] )
-				->conds( $cond )
-				->caller( __METHOD__ )
-				->fetchResultSet();
+				->conds( [
+					$db->expr( 'rc_id', '>=', $blockStart ),
+					$db->expr( 'rc_id', '<=', $blockEnd ),
+				] )
+				->caller( __METHOD__ );
+			if ( $cutoffCond ) {
+				$queryBuilder->andWhere( $cutoffCond );
+			}
+			$res = $queryBuilder->fetchResultSet();
 			$cuChangesBatch = [];
 			$cuPrivateEventBatch = [];
 			$cuLogEventBatch = [];
 			foreach ( $res as $row ) {
-				$eventTablesMigrationStage = $services->getMainConfig()
-					->get( 'CheckUserEventTablesMigrationStage' );
 				$comment = $commentStore->getComment( 'rc_comment', $row );
-				if (
-					$row->rc_type == RC_LOG &&
-					( $eventTablesMigrationStage & SCHEMA_COMPAT_WRITE_NEW )
-				) {
+				if ( $row->rc_type == RC_LOG ) {
 					$logEntry = null;
 					if ( $row->rc_logid != 0 ) {
 						$logEntry = DatabaseLogEntry::newFromId( $row->rc_logid, $db );
@@ -140,11 +138,7 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 							'cule_ip_hex' => IPUtils::toHex( $row->rc_ip ),
 						];
 					}
-				}
-				if (
-					$row->rc_type != RC_LOG ||
-					( $eventTablesMigrationStage & SCHEMA_COMPAT_WRITE_OLD )
-				) {
+				} else {
 					$cuChangesRow = [
 						'cuc_timestamp' => $row->rc_timestamp,
 						'cuc_namespace' => $row->rc_namespace,
@@ -158,14 +152,7 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 						'cuc_type' => $row->rc_type,
 						'cuc_ip' => $row->rc_ip,
 						'cuc_ip_hex' => IPUtils::toHex( $row->rc_ip ),
-						'cuc_only_for_read_old' => 0,
 					];
-					if (
-						$row->rc_type == RC_LOG &&
-						( $eventTablesMigrationStage & SCHEMA_COMPAT_WRITE_NEW )
-					) {
-						$cuChangesRow['cuc_only_for_read_old'] = 1;
-					}
 					$cuChangesBatch[] = $cuChangesRow;
 				}
 			}
@@ -192,11 +179,15 @@ class PopulateCheckUserTable extends LoggedUpdateMaintenance {
 			}
 			$blockStart += $this->mBatchSize - 1;
 			$blockEnd += $this->mBatchSize - 1;
-			$lbFactory->waitForReplication( [ 'ifWritesSince' => 5 ] );
-			$lbFactory->autoReconfigure();
+			$this->waitForReplication();
 		}
 
 		$this->output( "...cu_changes table has been populated.\n" );
+
+		// Run the population script for the central indexes now that the local CheckUser tables have been populated
+		$child = $this->createChild( PopulateCentralCheckUserIndexTables::class );
+		$child->execute();
+
 		return true;
 	}
 }

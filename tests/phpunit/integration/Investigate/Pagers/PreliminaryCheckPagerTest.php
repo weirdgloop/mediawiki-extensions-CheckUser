@@ -2,15 +2,15 @@
 
 namespace MediaWiki\CheckUser\Tests;
 
-use ExtensionRegistry;
+use MediaWiki\Block\DatabaseBlockStoreFactory;
 use MediaWiki\CheckUser\Investigate\Pagers\PreliminaryCheckPager;
 use MediaWiki\CheckUser\Investigate\Services\PreliminaryCheckService;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Context\RequestContext;
+use MediaWiki\Registration\ExtensionRegistry;
 use MediaWiki\User\UserGroupManagerFactory;
 use MediaWikiIntegrationTestCase;
-use RequestContext;
-use Wikimedia\Rdbms\ILBFactory;
+use Wikimedia\Rdbms\IConnectionProvider;
 
 /**
  * @group CheckUser
@@ -29,13 +29,14 @@ class PreliminaryCheckPagerTest extends MediaWikiIntegrationTestCase {
 		] );
 
 		$preliminaryCheckService = new PreliminaryCheckService(
-			$this->createMock( ILBFactory::class ),
+			$this->createMock( IConnectionProvider::class ),
 			$registry,
 			$this->createNoOpMock( UserGroupManagerFactory::class ),
+			$this->createNoOpMock( DatabaseBlockStoreFactory::class ),
 			'testwiki'
 		);
 
-		$services = MediaWikiServices::getInstance();
+		$services = $this->getServiceContainer();
 		$pager = new PreliminaryCheckPager( RequestContext::getMain(),
 			$services->getLinkRenderer(),
 			$services->getNamespaceInfo(),
@@ -59,7 +60,7 @@ class PreliminaryCheckPagerTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testGetIndexFieldLocal() {
-		$services = MediaWikiServices::getInstance();
+		$services = $this->getServiceContainer();
 		$pager = new PreliminaryCheckPager(
 			RequestContext::getMain(),
 			$services->getLinkRenderer(),
@@ -73,7 +74,7 @@ class PreliminaryCheckPagerTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testGetIndexFieldGlobal() {
-		$services = MediaWikiServices::getInstance();
+		$services = $this->getServiceContainer();
 		$pager = $this->getMockBuilder( PreliminaryCheckPager::class )
 			->setConstructorArgs( [ RequestContext::getMain(),
 				$services->getLinkRenderer(),

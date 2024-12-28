@@ -3,13 +3,12 @@
  * This feature is available for wikis that have Parsoid/RESTBase.
  */
 module.exports = function addCopyFeature() {
-	var copyTextLayout, messageWidget, wikitextButton,
+	let copyTextLayout = null,
+		wikitextButton = null,
 		hidden = true,
 		requested = false;
 
 	function onWikitextButtonClick() {
-		var url, html;
-
 		function getSanitizedHtml( $table ) {
 			$table = $table.clone();
 
@@ -17,14 +16,14 @@ module.exports = function addCopyFeature() {
 			$table.find( '.mw-userlink' )
 				.attr( 'rel', 'mw:ExtLink' )
 				.attr( 'href', function () {
-					return new mw.Uri( $( this ).attr( 'href' ) ).toString();
+					return new URL( $( this ).attr( 'href' ), location.href ).toString();
 				} );
 
 			$table.find( '[class]' ).addBack( '[class]' ).removeAttr( 'class' );
 			$table.addClass( 'mw-datatable' );
 
-			$table.find( 'tr, td' ).each( function ( i, element ) {
-				Object.keys( element.dataset ).forEach( function ( key ) {
+			$table.find( 'tr, td' ).each( ( i, element ) => {
+				Object.keys( element.dataset ).forEach( ( key ) => {
 					element.removeAttribute( 'data-' + key );
 				} );
 			} );
@@ -41,14 +40,11 @@ module.exports = function addCopyFeature() {
 			copyTextLayout.toggle( true );
 		}
 
-		// TODO: This API is deprecated with no replacement yet (T334238).
-		// Planned replacement: T310398.
-		url = mw.util.wikiScript( 'rest' ) + '/' + location.hostname + '/v3/transform/html/to/wikitext/';
-		html = getSanitizedHtml( $( '.ext-checkuser-investigate-table-compare' ) );
-
 		if ( !requested ) {
 			copyTextLayout.textInput.pushPending();
-			$.ajax( url, { data: { html: html }, type: 'POST' } ).then( function ( data ) {
+			const restApi = new mw.Rest();
+			const html = getSanitizedHtml( $( '.ext-checkuser-investigate-table-compare' ) );
+			restApi.post( '/v1/transform/html/to/wikitext/', { html: html } ).then( ( data ) => {
 				copyTextLayout.textInput.popPending();
 				copyTextLayout.textInput.setValue( data );
 			} );
@@ -57,7 +53,7 @@ module.exports = function addCopyFeature() {
 		requested = true;
 	}
 
-	messageWidget = new OO.ui.MessageWidget( {
+	const messageWidget = new OO.ui.MessageWidget( {
 		type: 'notice',
 		label: mw.msg( 'checkuser-investigate-compare-copy-message-label' ),
 		classes: [ 'ext-checkuser-investigate-copy-message' ]

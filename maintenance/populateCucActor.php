@@ -20,8 +20,7 @@
 
 namespace MediaWiki\CheckUser\Maintenance;
 
-use LoggedUpdateMaintenance;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Maintenance\LoggedUpdateMaintenance;
 
 $IP = getenv( 'MW_INSTALL_PATH' );
 if ( $IP === false ) {
@@ -59,7 +58,7 @@ class PopulateCucActor extends LoggedUpdateMaintenance {
 	 * @inheritDoc
 	 */
 	protected function doDBUpdates() {
-		$services = MediaWikiServices::getInstance();
+		$services = $this->getServiceContainer();
 		$actorStore = $services->getActorStore();
 		$mainLb = $services->getDBLoadBalancerFactory()->getMainLB();
 		$dbr = $mainLb->getConnection( DB_REPLICA, 'vslow' );
@@ -98,7 +97,8 @@ class PopulateCucActor extends LoggedUpdateMaintenance {
 				->table( 'cu_changes' )
 				->conds( [
 					'cuc_actor' => 0,
-					"cuc_id BETWEEN $prevId AND $curId"
+					$dbr->expr( 'cuc_id', '>=', $prevId ),
+					$dbr->expr( 'cuc_id', '<=', $curId ),
 				] )
 				->caller( __METHOD__ )
 				->fetchResultSet();
@@ -111,16 +111,12 @@ class PopulateCucActor extends LoggedUpdateMaintenance {
 					continue;
 				}
 
-				$dbw->update(
-					'cu_changes',
-					[
-						'cuc_actor' => $actor
-					],
-					[
-						'cuc_id' => $row->cuc_id
-					],
-					__METHOD__
-				);
+				$dbw->newUpdateQueryBuilder()
+					->update( 'cu_changes' )
+					->set( [ 'cuc_actor' => $actor ] )
+					->where( [ 'cuc_id' => $row->cuc_id ] )
+					->caller( __METHOD__ )
+					->execute();
 			}
 
 			$this->waitForReplication();

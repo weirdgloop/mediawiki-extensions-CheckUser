@@ -2,32 +2,39 @@
 
 namespace MediaWiki\CheckUser\Investigate\Pagers;
 
-use Html;
 use HtmlArmor;
-use Language;
-use Linker;
+use LogEventsList;
+use LogFormatter;
+use LogFormatterFactory;
+use LogPage;
+use ManualLogEntry;
+use MediaWiki\CheckUser\Services\CheckUserLookupUtils;
 use MediaWiki\CommentFormatter\CommentFormatter;
+use MediaWiki\CommentStore\CommentStore;
+use MediaWiki\Html\Html;
+use MediaWiki\Language\Language;
+use MediaWiki\Linker\Linker;
 use MediaWiki\Linker\LinkRenderer;
-use MediaWiki\Revision\ArchivedRevisionLookup;
+use MediaWiki\Message\Message;
 use MediaWiki\Revision\RevisionRecord;
-use MediaWiki\Revision\RevisionStore;
 use MediaWiki\SpecialPage\SpecialPageFactory;
+use MediaWiki\Title\TitleFormatter;
+use MediaWiki\Title\TitleValue;
+use MediaWiki\User\User;
 use MediaWiki\User\UserFactory;
+use MediaWiki\User\UserIdentityValue;
 use MediaWiki\User\UserRigorOptions;
-use Message;
-use TitleFormatter;
-use TitleValue;
-use User;
 use Wikimedia\IPUtils;
 
 class TimelineRowFormatter {
 	private LinkRenderer $linkRenderer;
-	private RevisionStore $revisionStore;
-	private ArchivedRevisionLookup $archivedRevisionLookup;
+	private CheckUserLookupUtils $checkUserLookupUtils;
 	private TitleFormatter $titleFormatter;
 	private SpecialPageFactory $specialPageFactory;
 	private UserFactory $userFactory;
 	private CommentFormatter $commentFormatter;
+	private CommentStore $commentStore;
+	private LogFormatterFactory $logFormatterFactory;
 
 	private array $message = [];
 
@@ -37,33 +44,36 @@ class TimelineRowFormatter {
 
 	/**
 	 * @param LinkRenderer $linkRenderer
-	 * @param RevisionStore $revisionStore
-	 * @param ArchivedRevisionLookup $archivedRevisionLookup
+	 * @param CheckUserLookupUtils $checkUserLookupUtils
 	 * @param TitleFormatter $titleFormatter
 	 * @param SpecialPageFactory $specialPageFactory
 	 * @param CommentFormatter $commentFormatter
 	 * @param UserFactory $userFactory
+	 * @param CommentStore $commentStore
+	 * @param LogFormatterFactory $logFormatterFactory
 	 * @param User $user
 	 * @param Language $language
 	 */
 	public function __construct(
 		LinkRenderer $linkRenderer,
-		RevisionStore $revisionStore,
-		ArchivedRevisionLookup $archivedRevisionLookup,
+		CheckUserLookupUtils $checkUserLookupUtils,
 		TitleFormatter $titleFormatter,
 		SpecialPageFactory $specialPageFactory,
 		CommentFormatter $commentFormatter,
 		UserFactory $userFactory,
+		CommentStore $commentStore,
+		LogFormatterFactory $logFormatterFactory,
 		User $user,
 		Language $language
 	) {
 		$this->linkRenderer = $linkRenderer;
-		$this->revisionStore = $revisionStore;
-		$this->archivedRevisionLookup = $archivedRevisionLookup;
+		$this->checkUserLookupUtils = $checkUserLookupUtils;
 		$this->titleFormatter = $titleFormatter;
 		$this->specialPageFactory = $specialPageFactory;
 		$this->commentFormatter = $commentFormatter;
 		$this->userFactory = $userFactory;
+		$this->commentStore = $commentStore;
+		$this->logFormatterFactory = $logFormatterFactory;
 		$this->user = $user;
 		$this->language = $language;
 
@@ -71,40 +81,48 @@ class TimelineRowFormatter {
 	}
 
 	/**
-	 * Format cu_changes record and display appropriate information
-	 * depending on user privileges
+	 * Format change, log event or private event record and display appropriate
+	 * information depending on user privileges
 	 *
 	 * @param \stdClass $row
 	 * @return string[][]
 	 */
 	public function getFormattedRowItems( \stdClass $row ): array {
-		$revRecord = null;
-		if (
-			$row->cuc_this_oldid != 0 &&
-			( $row->cuc_type == RC_EDIT || $row->cuc_type == RC_NEW )
-		) {
-			$revRecord = $this->revisionStore->getRevisionById( $row->cuc_this_oldid );
-			if ( !$revRecord ) {
-				// Revision may have been deleted
-				$revRecord = $this->archivedRevisionLookup->getArchivedRevisionRecord( null, $row->cuc_this_oldid );
-			}
+		// Use the IP as the $row->user_text if the actor ID is NULL and the IP is not NULL (T353953).
+		if ( $row->actor === null && $row->ip ) {
+			$row->user_text = $row->ip;
 		}
+
+		$user = $this->userFactory->newFromUserIdentity(
+			new UserIdentityValue( $row->user ?? 0, $row->user_text )
+		);
+
+		// Get either the RevisionRecord or ManualLogEntry associated with this row.
+		$revRecord = null;
+		$logEntry = null;
+		if ( ( $row->type == RC_EDIT || $row->type == RC_NEW ) && $row->this_oldid != 0 ) {
+			$revRecord = $this->checkUserLookupUtils->getRevisionRecordFromRow( $row );
+		} elseif ( $row->type == RC_LOG && $row->log_type ) {
+			$logEntry = $this->checkUserLookupUtils->getManualLogEntryFromRow( $row, $user );
+		}
+
 		return [
 			'links' => [
 				'logLink' => $this->getLogLink( $row ),
+				'logsLink' => $this->getLogsLink( $row, $logEntry ),
 				'diffLink' => $this->getDiffLink( $row ),
 				'historyLink' => $this->getHistoryLink( $row ),
-				'newPageFlag' => $this->getNewPageFlag( (int)$row->cuc_type ),
-				'minorFlag' => $this->getMinorFlag( (bool)$row->cuc_minor ),
+				'newPageFlag' => $this->getNewPageFlag( (int)$row->type ),
+				'minorFlag' => $this->getMinorFlag( (bool)$row->minor ),
 			],
 			'info' => [
 				'title' => $this->getTitleLink( $row ),
-				'time' => $this->getTime( $row->cuc_timestamp ),
-				'userLinks' => $this->getUserLinks( $row, $revRecord ),
-				'actionText' => $this->getActionText( $row->cuc_actiontext ),
-				'ipInfo' => $this->getIpInfo( $row->cuc_ip ),
-				'userAgent' => $this->getUserAgent( $row->cuc_agent ?? '' ),
-				'comment' => $this->getComment( $row, $revRecord ),
+				'time' => $this->getTime( $row->timestamp ),
+				'userLinks' => $this->getUserLinks( $row, $revRecord, $logEntry ),
+				'actionText' => $this->getActionText( $logEntry ),
+				'ipInfo' => $this->getIpInfo( $row->ip ),
+				'userAgent' => $this->getUserAgent( $row->agent ?? '' ),
+				'comment' => $this->getComment( $row, $revRecord, $logEntry ),
 			],
 		];
 	}
@@ -115,36 +133,24 @@ class TimelineRowFormatter {
 	 *
 	 * @param \stdClass $row
 	 * @param RevisionRecord|null $revRecord
+	 * @param ManualLogEntry|null $logEntry
 	 * @return string
 	 */
-	private function getComment( \stdClass $row, ?RevisionRecord $revRecord ): string {
-		$comment = '';
-
-		if (
-			$row->cuc_this_oldid != 0 &&
-			( $row->cuc_type == RC_EDIT || $row->cuc_type == RC_NEW )
-		) {
-			if (
-				$revRecord instanceof RevisionRecord &&
-				RevisionRecord::userCanBitfield(
-					$revRecord->getVisibility(),
-					RevisionRecord::DELETED_COMMENT,
-					$this->user
-				)
-			) {
-				$comment = $this->commentFormatter->formatRevision( $revRecord, $this->user );
-			} else {
-				$comment = $this->commentFormatter->formatBlock(
-					$this->msg( 'rev-deleted-comment' )->text(),
-					null,
-					false,
-					null,
-					false
-				);
-			}
+	private function getComment( \stdClass $row, ?RevisionRecord $revRecord, ?ManualLogEntry $logEntry ): string {
+		// Get the comment if there is one and only show it if the current authority can see it.
+		$commentVisible = true;
+		if ( $revRecord !== null ) {
+			$commentVisible = $revRecord->userCan( RevisionRecord::DELETED_COMMENT, $this->user );
+		} elseif ( $logEntry !== null ) {
+			$commentVisible = LogEventsList::userCan( $row, LogPage::DELETED_COMMENT, $this->user );
+		}
+		if ( $commentVisible ) {
+			$comment = $this->commentStore->getComment( 'comment', $row )->text;
+		} else {
+			$comment = $this->msg( 'rev-deleted-comment' )->text();
 		}
 
-		return $comment;
+		return $this->commentFormatter->formatBlock( $comment, null, false, null, false );
 	}
 
 	/**
@@ -166,11 +172,20 @@ class TimelineRowFormatter {
 	}
 
 	/**
-	 * @param string $actionText
+	 * @param ManualLogEntry|null $logEntry
 	 * @return string
 	 */
-	private function getActionText( string $actionText ): string {
-		return $this->commentFormatter->format( $actionText );
+	private function getActionText( ?ManualLogEntry $logEntry ): string {
+		// If there is no associated ManualLogEntry, then this is not a log event and by extension there is no action
+		// text.
+		if ( $logEntry === null ) {
+			return '';
+		}
+
+		// Log action text taken from the LogFormatter for the entry being displayed.
+		$logFormatter = $this->logFormatterFactory->newFromEntry( $logEntry );
+		$logFormatter->setAudience( LogFormatter::FOR_THIS_USER );
+		return $logFormatter->getActionText();
 	}
 
 	/**
@@ -178,11 +193,11 @@ class TimelineRowFormatter {
 	 * @return string
 	 */
 	private function getTitleLink( \stdClass $row ): string {
-		if ( $row->cuc_type == RC_LOG ) {
+		if ( $row->type == RC_LOG ) {
 			return '';
 		}
 
-		$title = TitleValue::tryNew( (int)$row->cuc_namespace, $row->cuc_title );
+		$title = TitleValue::tryNew( (int)$row->namespace, $row->title );
 
 		if ( !$title ) {
 			return '';
@@ -202,14 +217,15 @@ class TimelineRowFormatter {
 
 	/**
 	 * @param \stdClass $row
+	 * @param ManualLogEntry|null $logEntry
 	 * @return string
 	 */
-	private function getLogLink( \stdClass $row ): string {
-		if ( $row->cuc_type != RC_LOG ) {
+	private function getLogsLink( \stdClass $row, ?ManualLogEntry $logEntry ): string {
+		if ( $row->type != RC_LOG ) {
 			return '';
 		}
 
-		$title = TitleValue::tryNew( (int)$row->cuc_namespace, $row->cuc_title );
+		$title = TitleValue::tryNew( (int)$row->namespace, $row->title );
 
 		if ( !$title ) {
 			return '';
@@ -220,11 +236,20 @@ class TimelineRowFormatter {
 			return '';
 		}
 
+		// Hide the 'logs' link if the log entry details are hidden from the current user, as the title (which is
+		// included in the URL) will be hidden for this log entry.
+		if (
+			$logEntry &&
+			!LogEventsList::userCanBitfield( $logEntry->getDeleted(), LogPage::DELETED_ACTION, $this->user )
+		) {
+			return '';
+		}
+
 		return $this->msg( 'parentheses' )
 			->rawParams(
 				$this->linkRenderer->makeKnownLink(
 					new TitleValue( NS_SPECIAL, $this->specialPageFactory->getLocalNameFor( 'Log' ) ),
-					new HtmlArmor( $this->message['log'] ),
+					new HtmlArmor( $this->message['checkuser-logs-link-text'] ),
 					[],
 					[ 'page' => $this->titleFormatter->getPrefixedText( $title ) ]
 				)
@@ -235,12 +260,33 @@ class TimelineRowFormatter {
 	 * @param \stdClass $row
 	 * @return string
 	 */
-	private function getDiffLink( \stdClass $row ): string {
-		if ( $row->cuc_type == RC_NEW || $row->cuc_type == RC_LOG ) {
+	private function getLogLink( \stdClass $row ): string {
+		// Return no link if the row is not a log entry or if the log ID is not set.
+		if ( $row->type != RC_LOG || !$row->log_id ) {
 			return '';
 		}
 
-		$title = TitleValue::tryNew( (int)$row->cuc_namespace, $row->cuc_title );
+		return $this->msg( 'parentheses' )
+			->rawParams(
+				$this->linkRenderer->makeKnownLink(
+					new TitleValue( NS_SPECIAL, $this->specialPageFactory->getLocalNameFor( 'Log' ) ),
+					new HtmlArmor( $this->message['checkuser-log-link-text'] ),
+					[],
+					[ 'logid' => $row->log_id ]
+				)
+			)->escaped();
+	}
+
+	/**
+	 * @param \stdClass $row
+	 * @return string
+	 */
+	private function getDiffLink( \stdClass $row ): string {
+		if ( $row->type == RC_NEW || $row->type == RC_LOG ) {
+			return '';
+		}
+
+		$title = TitleValue::tryNew( (int)$row->namespace, $row->title );
 
 		if ( !$title ) {
 			return '';
@@ -258,9 +304,9 @@ class TimelineRowFormatter {
 					new HtmlArmor( $this->message['diff'] ),
 					[],
 					[
-						'curid' => $row->cuc_page_id,
-						'diff' => $row->cuc_this_oldid,
-						'oldid' => $row->cuc_last_oldid
+						'curid' => $row->page_id,
+						'diff' => $row->this_oldid,
+						'oldid' => $row->last_oldid
 					]
 				)
 			)->escaped();
@@ -271,11 +317,11 @@ class TimelineRowFormatter {
 	 * @return string
 	 */
 	private function getHistoryLink( \stdClass $row ): string {
-		if ( $row->cuc_type == RC_NEW || $row->cuc_type == RC_LOG ) {
+		if ( $row->type == RC_NEW || $row->type == RC_LOG ) {
 			return '';
 		}
 
-		$title = TitleValue::tryNew( (int)$row->cuc_namespace, $row->cuc_title );
+		$title = TitleValue::tryNew( (int)$row->namespace, $row->title );
 
 		if ( !$title ) {
 			return '';
@@ -293,7 +339,7 @@ class TimelineRowFormatter {
 					new HtmlArmor( $this->message['hist'] ),
 					[],
 					[
-						'curid' => $row->cuc_page_id,
+						'curid' => $row->page_id,
 						'action' => 'history'
 					]
 				)
@@ -342,20 +388,18 @@ class TimelineRowFormatter {
 	/**
 	 * @param \stdClass $row
 	 * @param RevisionRecord|null $revRecord
+	 * @param ManualLogEntry|null $logEntry
 	 * @return string
 	 */
-	private function getUserLinks( \stdClass $row, ?RevisionRecord $revRecord ): string {
-		// Note: this is incomplete. It should match the checks
-		// in SpecialCheckUser when displaying the same info
-		$userIsHidden = $this->isUserHidden( $row->cuc_user_text );
+	private function getUserLinks( \stdClass $row, ?RevisionRecord $revRecord, ?ManualLogEntry $logEntry ): string {
+		$userIsHidden = $this->isUserHidden( $row->user_text );
 		$userHiddenClass = '';
 		if ( $userIsHidden ) {
 			$userHiddenClass = 'history-deleted mw-history-suppressed';
 		}
+		// Check if the RevisionRecord says that the user is hidden.
 		if (
 			!$userIsHidden &&
-			$row->cuc_this_oldid != 0 &&
-			( $row->cuc_type == RC_EDIT || $row->cuc_type == RC_NEW ) &&
 			$revRecord instanceof RevisionRecord
 		) {
 			$userIsHidden = !RevisionRecord::userCanBitfield(
@@ -363,7 +407,26 @@ class TimelineRowFormatter {
 				RevisionRecord::DELETED_USER,
 				$this->user
 			);
-			$userHiddenClass = Linker::getRevisionDeletedClass( $revRecord );
+			if ( $userIsHidden ) {
+				$userHiddenClass = Linker::getRevisionDeletedClass( $revRecord );
+			}
+		}
+		// Check if the ManualLogEntry says that the user is hidden.
+		if (
+			!$userIsHidden &&
+			$logEntry instanceof ManualLogEntry
+		) {
+			$userIsHidden = !LogEventsList::userCanBitfield(
+				$logEntry->getDeleted(),
+				LogPage::DELETED_USER,
+				$this->user
+			);
+			if ( $userIsHidden ) {
+				$userHiddenClass = 'history-deleted';
+				if ( $logEntry->isDeleted( LogPage::DELETED_RESTRICTED ) ) {
+					$userHiddenClass .= ' mw-history-suppressed';
+				}
+			}
 		}
 		if ( $userIsHidden ) {
 			return Html::element(
@@ -372,12 +435,12 @@ class TimelineRowFormatter {
 				$this->msg( 'rev-deleted-user' )->text()
 			);
 		} else {
-			$userId = $row->cuc_user ?? 0;
+			$userId = $row->user ?? 0;
 			if ( $userId > 0 ) {
 				$user = $this->userFactory->newFromId( $userId );
 			} else {
 				// This is an IP
-				$user = $this->userFactory->newFromName( $row->cuc_user_text, UserRigorOptions::RIGOR_NONE );
+				$user = $this->userFactory->newFromName( $row->user_text, UserRigorOptions::RIGOR_NONE );
 			}
 
 			$links = Html::rawElement(
@@ -399,7 +462,10 @@ class TimelineRowFormatter {
 	 * they are called often, we call them once and save them in $this->message
 	 */
 	private function preCacheMessages() {
-		$msgKeys = [ 'diff', 'hist', 'minoreditletter', 'newpageletter', 'blocklink', 'log' ];
+		$msgKeys = [
+			'diff', 'hist', 'minoreditletter', 'newpageletter', 'blocklink',
+			'checkuser-logs-link-text', 'checkuser-log-link-text',
+		];
 		foreach ( $msgKeys as $msg ) {
 			$this->message[$msg] = $this->msg( $msg )->escaped();
 		}

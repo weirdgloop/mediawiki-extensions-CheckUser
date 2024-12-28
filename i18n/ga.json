@@ -19,7 +19,6 @@
 	"checkuser-query": "Iarratais ar athruithe úrnua",
 	"checkuser-target": "Seoladh IP ná úsáideoir:",
 	"checkuser-users": "Faigh úsáideoira",
-	"checkuser-edits": "Faigh athruithe don seoladh IP seo",
 	"checkuser-ips": "Faigh Seolaidh IP",
 	"checkuser-week-1": "an tseachtain seo caite",
 	"checkuser-week-2": "dhá sheachtain seo caite",
@@ -32,14 +31,8 @@
 	"checkuser-gblocked": "Cosanta domhandach",
 	"checkuser-locked": "Glasáilte",
 	"checkuser-massblock": "Cuir cosc ar na húsáideoirí roghnaithe",
-	"checkuser-massblock-commit": "Cur cosc ar na n-úsáideoirí roghnaithe",
-	"checkuser-block-success": "'''Tá {{PLURAL:$2|an úsáideoir|na n-úsáideoirí}} $1 coiscthe anois.'''",
-	"checkuser-block-failure": "'''Níl aon úsáideoirí coiscthe.'''",
 	"checkuser-search": "Cuardaigh",
 	"checkuser-search-submit": "Cuardaigh",
 	"checkuser-ipeditcount": "~$1 as na n-úsáideoir go léir",
-	"checkuser-autocreate-action": "a chruthú go huathoibríoch",
-	"checkuser-email-action": "a chur riomhphoist do úsáideoir \"$1\"",
-	"checkuser-reset-action": "a athshocrú pásfhocal le úsáideoir \"$1\"",
 	"logentry-checkuser-private-event-autocreate-account": "a chruthú go huathoibríoch"
 }

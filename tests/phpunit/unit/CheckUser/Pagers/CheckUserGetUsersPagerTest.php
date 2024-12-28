@@ -2,15 +2,11 @@
 
 namespace MediaWiki\CheckUser\Tests\Unit\CheckUser\Pagers;
 
-use HashConfig;
 use LogicException;
 use MediaWiki\CheckUser\CheckUser\Pagers\CheckUserGetUsersPager;
 use MediaWiki\CheckUser\ClientHints\ClientHintsReferenceIds;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsLookup;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
-use MediaWiki\User\UserIdentityValue;
-use RequestContext;
-use Wikimedia\IPUtils;
 use Wikimedia\Rdbms\FakeResultWrapper;
 use Wikimedia\TestingAccessWrapper;
 use Wikimedia\Timestamp\ConvertibleTimestamp;
@@ -22,7 +18,7 @@ use Wikimedia\Timestamp\ConvertibleTimestamp;
  *
  * @covers \MediaWiki\CheckUser\CheckUser\Pagers\CheckUserGetUsersPager
  */
-class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
+class CheckUserGetUsersPagerTest extends CheckUserPagerUnitTestBase {
 
 	protected function getPagerClass(): string {
 		return CheckUserGetUsersPager::class;
@@ -59,97 +55,19 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 		$object->getQueryInfo( null );
 	}
 
-	/** @dataProvider provideGetQueryInfo */
-	public function testGetQueryInfo( $table, $tableSpecificQueryInfo, $expectedQueryInfo ) {
-		// Mock config on main request context for ::getIpConds which is static
-		// and gets the config from the main request.
-		RequestContext::getMain()->setConfig(
-			new HashConfig( [ 'CheckUserCIDRLimit' => [
-				'IPv4' => 16,
-				'IPv6' => 19,
-			] ] )
-		);
-		$this->commonTestGetQueryInfo(
-			UserIdentityValue::newAnonymous( '127.0.0.1' ), false,
-			$table, $tableSpecificQueryInfo, $expectedQueryInfo
-		);
-	}
-
-	public static function provideGetQueryInfo() {
-		return [
-			'cu_changes table' => [
-				'cu_changes', [
-					'tables' => [ 'cu_changes' ],
-					'conds' => [ 'cuc_only_for_read_old' => 0 ],
-					'fields' => [], 'options' => [], 'join_conds' => [],
-				],
-				[
-					'tables' => [ 'cu_changes' ],
-					'conds' => [ 'cuc_ip_hex' => IPUtils::toHex( '127.0.0.1' ), 'cuc_only_for_read_old' => 0 ],
-					'fields' => [],
-					'options' => [ 'USE INDEX' => [ 'cu_changes' => 'cuc_ip_hex_time' ] ],
-					'join_conds' => [],
-				]
-			],
-			'cu_log_event table' => [
-				'cu_log_event', [
-					'tables' => [ 'cu_log_event' ], 'conds' => [],
-					'fields' => [], 'options' => [], 'join_conds' => [],
-				],
-				[
-					'tables' => [ 'cu_log_event' ],
-					'conds' => [ 'cule_ip_hex' => IPUtils::toHex( '127.0.0.1' ) ],
-					'fields' => [],
-					'options' => [ 'USE INDEX' => [ 'cu_log_event' => 'cule_ip_hex_time' ] ],
-					'join_conds' => [],
-				]
-			],
-			'cu_private_event table' => [
-				'cu_private_event', [
-					'tables' => [ 'cu_private_event' ], 'conds' => [],
-					'fields' => [], 'options' => [], 'join_conds' => [],
-				],
-				[
-					'tables' => [ 'cu_private_event' ],
-					'conds' => [ 'cupe_ip_hex' => IPUtils::toHex( '127.0.0.1' ) ],
-					'fields' => [],
-					'options' => [ 'USE INDEX' => [ 'cu_private_event' => 'cupe_ip_hex_time' ] ],
-					'join_conds' => [],
-				]
-			],
-		];
-	}
-
 	/** @dataProvider provideGetQueryInfoForCuChanges */
-	public function testGetQueryInfoForCuChanges( $eventTableMigrationStage, $displayClientHints, $expectedQueryInfo ) {
+	public function testGetQueryInfoForCuChanges( $displayClientHints, $expectedQueryInfo ) {
 		$this->commonGetQueryInfoForTableSpecificMethod(
 			'getQueryInfoForCuChanges',
-			[
-				'eventTableReadNew' => boolval( $eventTableMigrationStage & SCHEMA_COMPAT_READ_NEW ),
-				'displayClientHints' => $displayClientHints
-			],
+			[ 'displayClientHints' => $displayClientHints ],
 			$expectedQueryInfo
 		);
 	}
 
 	public static function provideGetQueryInfoForCuChanges() {
 		return [
-			'Returns expected keys to arrays and includes cu_changes in tables while reading new' => [
-				SCHEMA_COMPAT_READ_NEW, false, [
-					// Fields should be an array
-					'fields' => [],
-					// Assert at least cu_changes in the table list
-					'tables' => [ 'cu_changes' ],
-					// When reading new, do not include rows from cu_changes
-					// that were marked as only being for read old.
-					'conds' => [ 'cuc_only_for_read_old' => 0 ],
-					// Should be all of these as arrays
-					'options' => [],
-					'join_conds' => [],
-				]
-			],
-			'Returns expected keys to arrays and includes cu_changes in tables while reading old' => [
-				SCHEMA_COMPAT_READ_OLD, false, [
+			'Returns expected keys to arrays and includes cu_changes in tables' => [
+				false, [
 					// Fields should be an array
 					'fields' => [],
 					// Assert at least cu_changes in the table list
@@ -161,7 +79,6 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 				]
 			],
 			'Client Hints enabled' => [
-				SCHEMA_COMPAT_READ_OLD,
 				true,
 				[
 					'fields' => [
@@ -234,7 +151,8 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 					# All other values should be arrays
 					'conds' => [],
 					'options' => [],
-					'join_conds' => [],
+					// The actor table should be joined using a LEFT JOIN
+					'join_conds' => [ 'actor_cupe_actor' => [ 'LEFT JOIN', 'actor_cupe_actor.actor_id=cupe_actor' ] ],
 				]
 			],
 			'Client Hints enabled' => [
@@ -353,6 +271,7 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 					[
 						'user_text' => 'Test',
 						'user' => 1,
+						'actor' => 1,
 						'ip' => '127.0.0.1',
 						'xff' => null,
 						'agent' => 'Testing user agent',
@@ -378,6 +297,7 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 					[
 						'user_text' => 'Test',
 						'user' => 1,
+						'actor' => 1,
 						'ip' => '127.0.0.1',
 						'xff' => '125.6.5.4',
 						'agent' => 'Testing user agent',
@@ -388,6 +308,7 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 					[
 						'user_text' => 'Testing',
 						'user' => 2,
+						'actor' => 2,
 						'ip' => '127.0.0.2',
 						'xff' => null,
 						'agent' => 'Testing user agent',
@@ -398,6 +319,7 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 					[
 						'user_text' => 'Test',
 						'user' => 1,
+						'actor' => 1,
 						'ip' => '127.0.0.2',
 						'xff' => null,
 						'agent' => 'Testing user agent1234',
@@ -408,6 +330,19 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 					[
 						'user_text' => 'Test',
 						'user' => 1,
+						'actor' => 1,
+						'ip' => '127.0.0.1',
+						'xff' => null,
+						'agent' => 'Testing user agent',
+						'timestamp' => $smallestFakeTimestamp,
+						'client_hints_reference_id' => 456,
+						'client_hints_reference_type' => UserAgentClientHintsManager::IDENTIFIER_CU_PRIVATE_EVENT,
+					],
+					// A row with the actor ID column as null
+					[
+						'user_text' => null,
+						'user' => null,
+						'actor' => null,
 						'ip' => '127.0.0.1',
 						'xff' => null,
 						'agent' => 'Testing user agent',
@@ -425,21 +360,29 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 					UserAgentClientHintsManager::IDENTIFIER_CU_PRIVATE_EVENT => [ 456 ],
 				] ),
 				[
-					'first' => [ 'Test' => $smallestFakeTimestamp, 'Testing' => $middleFakeTimestamp ],
-					'last' => [ 'Test' => $largestFakeTimestamp, 'Testing' => $middleFakeTimestamp ],
-					'edits' => [ 'Test' => 3, 'Testing' => 1 ],
-					'ids' => [ 'Test' => 1, 'Testing' => 2 ],
+					'first' => [
+						'Test' => $smallestFakeTimestamp,
+						'Testing' => $middleFakeTimestamp,
+						'127.0.0.1' => $smallestFakeTimestamp,
+					],
+					'last' => [
+						'Test' => $largestFakeTimestamp,
+						'Testing' => $middleFakeTimestamp,
+						'127.0.0.1' => $smallestFakeTimestamp,
+					],
+					'edits' => [ 'Test' => 3, 'Testing' => 1, '127.0.0.1' => 1 ],
+					'ids' => [ 'Test' => 1, 'Testing' => 2, '127.0.0.1' => 0 ],
 					'infosets' => [
 						'Test' => [
 							[ '127.0.0.1', '125.6.5.4' ], [ '127.0.0.2', null ], [ '127.0.0.1', null ]
 						],
-						'Testing' => [
-							[ '127.0.0.2', null ]
-						],
+						'Testing' => [ [ '127.0.0.2', null ] ],
+						'127.0.0.1' => [ [ '127.0.0.1', null ] ],
 					],
 					'agentsets' => [
 						'Test' => [ 'Testing user agent', 'Testing user agent1234' ],
-						'Testing' => [ 'Testing user agent' ]
+						'Testing' => [ 'Testing user agent' ],
+						'127.0.0.1' => [ 'Testing user agent' ],
 					],
 					'clienthints' => [
 						'Test' => new ClientHintsReferenceIds( [
@@ -449,6 +392,9 @@ class CheckUserGetUsersPagerTest extends CheckUserPagerCommonUnitTest {
 						] ),
 						'Testing' => new ClientHintsReferenceIds( [
 							UserAgentClientHintsManager::IDENTIFIER_CU_CHANGES => [ 123 ],
+						] ),
+						'127.0.0.1' => new ClientHintsReferenceIds( [
+							UserAgentClientHintsManager::IDENTIFIER_CU_PRIVATE_EVENT => [ 456 ],
 						] ),
 					]
 				]

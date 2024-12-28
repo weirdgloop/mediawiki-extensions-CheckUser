@@ -8,10 +8,10 @@ use MediaWiki\CheckUser\ClientHints\ClientHintsReferenceIds;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
 use MediaWiki\CheckUser\Tests\CheckUserClientHintsCommonTraitTest;
 use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\Status\Status;
 use MediaWiki\Tests\Unit\MockServiceDependenciesTrait;
 use MediaWikiUnitTestCase;
 use Psr\Log\LoggerInterface;
-use Status;
 use Wikimedia\Rdbms\DeleteQueryBuilder;
 use Wikimedia\Rdbms\IConnectionProvider;
 use Wikimedia\Rdbms\IDatabase;
@@ -85,7 +85,7 @@ class UserAgentClientHintsManagerTest extends MediaWikiUnitTestCase {
 	public function testInsertClientHintValuesReturnsFatalOnExistingMapping() {
 		// Mock replica DB
 		$dbrMock = $this->createMock( IReadableDatabase::class );
-		$dbrMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn() => new SelectQueryBuilder( $dbrMock ) );
+		$dbrMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn () => new SelectQueryBuilder( $dbrMock ) );
 		// One read should occur on the replica DB
 		$dbrMock->expects( $this->once() )
 			->method( 'selectRowCount' )
@@ -102,7 +102,7 @@ class UserAgentClientHintsManagerTest extends MediaWikiUnitTestCase {
 			)->willReturn( 11 );
 		// Mock primary DB
 		$dbwMock = $this->createMock( IDatabase::class );
-		$dbwMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn() => new SelectQueryBuilder( $dbwMock ) );
+		$dbwMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn () => new SelectQueryBuilder( $dbwMock ) );
 		// Read should not occur on the primary DB.
 		$dbwMock->expects( $this->never() )->method( 'selectRowCount' );
 		$objectToTest = $this->getObjectUnderTest( $dbwMock, $dbrMock );
@@ -150,7 +150,7 @@ class UserAgentClientHintsManagerTest extends MediaWikiUnitTestCase {
 	public function testNoInsertOfMapRowsOnMissingClientHintsDataRow() {
 		// Mock replica DB
 		$dbrMock = $this->createMock( IReadableDatabase::class );
-		$dbrMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn() => new SelectQueryBuilder( $dbrMock ) );
+		$dbrMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn () => new SelectQueryBuilder( $dbrMock ) );
 		$dbrMock->expects( $this->once() )
 			->method( 'selectField' )
 			->with(
@@ -185,7 +185,7 @@ class UserAgentClientHintsManagerTest extends MediaWikiUnitTestCase {
 	public function testSuccessfulInsertMappingRows() {
 		// Mock replica DB
 		$dbrMock = $this->createMock( IReadableDatabase::class );
-		$dbrMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn() => new SelectQueryBuilder( $dbrMock ) );
+		$dbrMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn () => new SelectQueryBuilder( $dbrMock ) );
 		$dbrMock->expects( $this->once() )
 			->method( 'selectField' )
 			->with(
@@ -201,7 +201,7 @@ class UserAgentClientHintsManagerTest extends MediaWikiUnitTestCase {
 			)->willReturn( 2 );
 		// Mock primary DB
 		$dbwMock = $this->createMock( IDatabase::class );
-		$dbwMock->method( 'newInsertQueryBuilder' )->willReturnCallback( fn() => new InsertQueryBuilder( $dbwMock ) );
+		$dbwMock->method( 'newInsertQueryBuilder' )->willReturnCallback( fn () => new InsertQueryBuilder( $dbwMock ) );
 		$dbwMock->expects( $this->once() )
 			->method( 'insert' )
 			->with(
@@ -226,14 +226,15 @@ class UserAgentClientHintsManagerTest extends MediaWikiUnitTestCase {
 	) {
 		// Mock primary DB
 		$dbwMock = $this->createMock( IDatabase::class );
-		$dbwMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn() => new SelectQueryBuilder( $dbwMock ) );
-		$dbwMock->method( 'newDeleteQueryBuilder' )->willReturnCallback( fn() => new DeleteQueryBuilder( $dbwMock ) );
-		$dbwDeleteWithConsecutive = [];
+		$dbwMock->method( 'newSelectQueryBuilder' )->willReturnCallback( fn () => new SelectQueryBuilder( $dbwMock ) );
+		$dbwMock->method( 'newDeleteQueryBuilder' )->willReturnCallback( fn () => new DeleteQueryBuilder( $dbwMock ) );
+		$dbwDeleteExpectedArgs = [];
+		$dbwAffectedRowsConsecutiveReturn = [];
 		// Test cases that the DB methods are called as appropriate.
 		$idsCount = 0;
 		foreach ( $referenceIds as $type => $ids ) {
 			$idsCount += count( $ids );
-			$dbwDeleteWithConsecutive[] = [
+			$dbwDeleteExpectedArgs[] = [
 				'cu_useragent_clienthints_map',
 				[
 					'uachm_reference_id' => $ids,
@@ -245,7 +246,9 @@ class UserAgentClientHintsManagerTest extends MediaWikiUnitTestCase {
 		}
 		$dbwMock
 			->method( 'delete' )
-			->withConsecutive( ...$dbwDeleteWithConsecutive );
+			->willReturnCallback( function ( ...$args ) use ( &$dbwDeleteExpectedArgs ) {
+				$this->assertSame( array_shift( $dbwDeleteExpectedArgs ), $args );
+			} );
 		$dbwMock
 			->method( 'affectedRows' )
 			->willReturnOnConsecutiveCalls( ...$dbwAffectedRowsConsecutiveReturn );

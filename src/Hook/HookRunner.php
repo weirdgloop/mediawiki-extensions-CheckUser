@@ -2,8 +2,8 @@
 
 namespace MediaWiki\CheckUser\Hook;
 
-use IContextSource;
 use MediaWiki\CheckUser\CheckUser\Pagers\AbstractCheckUserPager;
+use MediaWiki\Context\IContextSource;
 use MediaWiki\HookContainer\HookContainer;
 use MediaWiki\User\UserIdentity;
 use RecentChange;
@@ -15,7 +15,6 @@ class HookRunner implements
 	CheckUserInsertChangesRowHook,
 	CheckUserInsertLogEventRowHook,
 	CheckUserInsertPrivateEventRowHook,
-	CheckUserInsertForRecentChangeHook,
 	SpecialCheckUserGetLinksFromRowHook
 {
 
@@ -78,14 +77,6 @@ class HookRunner implements
 		$this->container->run(
 			'CheckUserInsertPrivateEventRow',
 			[ &$ip, &$xff, &$row, $user, $rc ]
-		);
-	}
-
-	/** @inheritDoc */
-	public function onCheckUserInsertForRecentChange( RecentChange $rc, array &$rcRow ) {
-		$this->container->run(
-			'CheckUserInsertForRecentChange',
-			[ $rc, &$rcRow ]
 		);
 	}
 

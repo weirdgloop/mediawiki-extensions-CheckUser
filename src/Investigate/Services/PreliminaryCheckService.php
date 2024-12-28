@@ -2,20 +2,20 @@
 
 namespace MediaWiki\CheckUser\Investigate\Services;
 
-use ExtensionRegistry;
-use MediaWiki\Block\DatabaseBlock;
+use MediaWiki\Block\DatabaseBlockStoreFactory;
+use MediaWiki\Registration\ExtensionRegistry;
+use MediaWiki\User\User;
 use MediaWiki\User\UserGroupManagerFactory;
 use MediaWiki\User\UserIdentityValue;
 use stdClass;
-use User;
 use Wikimedia\Rdbms\IConnectionProvider;
-use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\IResultWrapper;
 
 class PreliminaryCheckService {
 	private IConnectionProvider $dbProvider;
 	private UserGroupManagerFactory $userGroupManagerFactory;
 	private ExtensionRegistry $extensionRegistry;
+	private DatabaseBlockStoreFactory $blockStoreFactory;
 
 	/** @var string */
 	private $localWikiId;
@@ -24,17 +24,20 @@ class PreliminaryCheckService {
 	 * @param IConnectionProvider $dbProvider
 	 * @param ExtensionRegistry $extensionRegistry
 	 * @param UserGroupManagerFactory $userGroupManagerFactory
+	 * @param DatabaseBlockStoreFactory $blockStoreFactory
 	 * @param string $localWikiId
 	 */
 	public function __construct(
 		IConnectionProvider $dbProvider,
 		ExtensionRegistry $extensionRegistry,
 		UserGroupManagerFactory $userGroupManagerFactory,
+		DatabaseBlockStoreFactory $blockStoreFactory,
 		string $localWikiId
 	) {
 		$this->dbProvider = $dbProvider;
 		$this->extensionRegistry = $extensionRegistry;
 		$this->userGroupManagerFactory = $userGroupManagerFactory;
+		$this->blockStoreFactory = $blockStoreFactory;
 		$this->localWikiId = $localWikiId;
 	}
 
@@ -151,8 +154,6 @@ class PreliminaryCheckService {
 	 * @return array
 	 */
 	protected function getAdditionalLocalData( $row, string $wikiId ): array {
-		$dbr = $this->dbProvider->getReplicaDatabase( $wikiId );
-
 		if ( $wikiId === $this->localWikiId ) {
 			$userIdentity = new UserIdentityValue( (int)$row->user_id, $row->user_name );
 		} else {
@@ -164,7 +165,7 @@ class PreliminaryCheckService {
 			'name' => $row->user_name,
 			'registration' => $row->user_registration,
 			'editcount' => $row->user_editcount,
-			'blocked' => $this->isUserBlocked( $row->user_id, $dbr ),
+			'blocked' => $this->isUserBlocked( $row->user_id, $wikiId ),
 			'groups' => $this->userGroupManagerFactory
 				->getUserGroupManager( $wikiId )
 				->getUserGroups( $userIdentity ),
@@ -174,24 +175,12 @@ class PreliminaryCheckService {
 
 	/**
 	 * @param int $userId
-	 * @param IDatabase $dbr Database connection
+	 * @param string $wikiId
 	 * @return bool
 	 */
-	protected function isUserBlocked( int $userId, IDatabase $dbr ): bool {
-		// No need to use any other field than ipb_expiry
-		// so no need to use DatabaseBlock::newFromRow
-		$expiry = $dbr->newSelectQueryBuilder()
-			->field( 'ipb_expiry' )
-			->table( 'ipblocks' )
-			->where( [ 'ipb_user' => $userId ] )
-			->caller( __METHOD__ )
-			->fetchField();
-		if ( $expiry ) {
-			$blockObject = new DatabaseBlock;
-			$blockObject->setExpiry( $dbr->decodeExpiry( $expiry ) );
-			return !$blockObject->isExpired();
-		} else {
-			return false;
-		}
+	protected function isUserBlocked( int $userId, string $wikiId ): bool {
+		return (bool)$this->blockStoreFactory
+			->getDatabaseBlockStore( $wikiId )
+			->newListFromConds( [ 'bt_user' => $userId ] );
 	}
 }

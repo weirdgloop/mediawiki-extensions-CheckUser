@@ -7,7 +7,7 @@
  * @param {Object} revIds
  * @param {Object} logIds
  * @param {boolean} retryOnTokenMismatch
- * @returns {Promise}
+ * @return {Promise}
  */
 function performRevealRequest( target, revIds, logIds, retryOnTokenMismatch ) {
 	if ( retryOnTokenMismatch === undefined ) {
@@ -24,7 +24,7 @@ function performRevealRequest( target, revIds, logIds, retryOnTokenMismatch ) {
  * @param {Object} revIds
  * @param {Object} logIds
  * @param {boolean} retryOnTokenMismatch
- * @returns {Promise}
+ * @return {Promise}
  */
 function performFullRevealRequest( target, revIds, logIds, retryOnTokenMismatch ) {
 	if ( retryOnTokenMismatch === undefined ) {
@@ -35,18 +35,18 @@ function performFullRevealRequest( target, revIds, logIds, retryOnTokenMismatch 
 }
 
 function performRevealRequestInternal( target, revIds, logIds, limit, retryOnTokenMismatch ) {
-	var restApi = new mw.Rest();
-	var api = new mw.Api();
-	var deferred = $.Deferred();
-	api.getToken( 'csrf' ).then( function ( token ) {
+	const restApi = new mw.Rest();
+	const api = new mw.Api();
+	const deferred = $.Deferred();
+	api.getToken( 'csrf' ).then( ( token ) => {
 		restApi.post(
 			'/checkuser/v0/temporaryaccount/' + target + buildQuery( revIds, logIds, limit ),
 			{ token: token }
 		).then(
-			function ( data ) {
+			( data ) => {
 				deferred.resolve( data );
 			},
-			function ( err, errObject ) {
+			( err, errObject ) => {
 				if (
 					retryOnTokenMismatch &&
 					errObject.xhr &&
@@ -57,10 +57,10 @@ function performRevealRequestInternal( target, revIds, logIds, limit, retryOnTok
 					// The CSRF token has expired. Retry the POST with a new token.
 					api.badToken( 'csrf' );
 					performRevealRequestInternal( target, revIds, logIds, limit, false ).then(
-						function ( data ) {
+						( data ) => {
 							deferred.resolve( data );
 						},
-						function ( secondRequestErr, secondRequestErrObject ) {
+						( secondRequestErr, secondRequestErrObject ) => {
 							deferred.reject( secondRequestErr, secondRequestErrObject );
 						}
 					);
@@ -69,7 +69,7 @@ function performRevealRequestInternal( target, revIds, logIds, limit, retryOnTok
 				}
 			}
 		);
-	} ).fail( function ( err, errObject ) {
+	} ).fail( ( err, errObject ) => {
 		deferred.reject( err, errObject );
 	} );
 	return deferred.promise();
@@ -81,15 +81,15 @@ function performRevealRequestInternal( target, revIds, logIds, limit, retryOnTok
  * @param {Object} revIds
  * @param {Object} logIds
  * @param {number|false} limit
- * @returns {string}
+ * @return {string}
  */
 function buildQuery( revIds, logIds, limit ) {
-	var urlParams = '';
-	var queryStringParams = new URLSearchParams();
+	let urlParams = '';
+	const queryStringParams = new URLSearchParams();
 
-	if ( revIds && revIds.allIds && revIds.allIds.length ) {
+	if ( isRevisionLookup( revIds ) ) {
 		urlParams += '/revisions/' + revIds.allIds.join( '|' );
-	} else if ( logIds && logIds.allIds && logIds.allIds.length ) {
+	} else if ( isLogLookup( logIds ) ) {
 		urlParams += '/logs/' + logIds.allIds.join( '|' );
 	} else if ( limit ) {
 		queryStringParams.set( 'limit', String( limit ) );
@@ -102,7 +102,27 @@ function buildQuery( revIds, logIds, limit ) {
 	return urlParams + '?' + queryStringParams.toString();
 }
 
+/**
+ * Determine whether to look up IPs for revision IDs.
+ *
+ * @return {boolean} There are revision IDs
+ */
+function isRevisionLookup( revIds ) {
+	return !!( revIds && revIds.allIds && revIds.allIds.length );
+}
+
+/**
+ * Determine whether to look up IPs for log IDs.
+ *
+ * @return {boolean} There are log IDs
+ */
+function isLogLookup( logIds ) {
+	return !!( logIds && logIds.allIds && logIds.allIds.length );
+}
+
 module.exports = {
 	performRevealRequest: performRevealRequest,
-	performFullRevealRequest: performFullRevealRequest
+	performFullRevealRequest: performFullRevealRequest,
+	isRevisionLookup: isRevisionLookup,
+	isLogLookup: isLogLookup
 };

@@ -5,7 +5,7 @@
 			{
 				"name": "cuc_id",
 				"comment": "Primary key",
-				"type": "integer",
+				"type": "bigint",
 				"options": { "autoincrement": true, "notnull": true, "unsigned": true }
 			},
 			{
@@ -23,12 +23,6 @@
 				"name": "cuc_actor",
 				"type": "bigint",
 				"options": { "notnull": true, "unsigned": true }
-			},
-			{
-				"name": "cuc_actiontext",
-				"comment": "Edit summary",
-				"type": "binary",
-				"options": { "notnull": true, "length": 255, "default": "" }
 			},
 			{
 				"name": "cuc_comment_id",
@@ -101,15 +95,10 @@
 				"options": { "notnull": false, "length": 255 }
 			},
 			{
-				"name": "cuc_private",
-				"comment": "Private Data",
-				"type": "blob",
-				"options": { "notnull": false, "length": 16777215 }
-			},
-			{
-				"name": "cuc_only_for_read_old",
-				"type": "mwtinyint",
-				"options": { "notnull": true, "length": 1, "default": 0 }
+				"name": "cuc_agent_id",
+				"comment": "Foreign key to cu_useragent table on the cuua_id field. Represents the user agent string used for this change.",
+				"type": "bigint",
+				"options": { "notnull": true, "unsigned": true, "default": 0 }
 			}
 		],
 		"indexes": [
@@ -193,6 +182,12 @@
 				"comment": "User agent",
 				"type": "binary",
 				"options": { "notnull": false, "length": 255 }
+			},
+			{
+				"name": "cule_agent_id",
+				"comment": "Foreign key to cu_useragent table on the cuua_id field. Represents the user agent string used for this log event.",
+				"type": "bigint",
+				"options": { "notnull": true, "unsigned": true, "default": 0 }
 			}
 		],
 		"indexes": [
@@ -243,7 +238,7 @@
 			{
 				"name": "cupe_actor",
 				"type": "bigint",
-				"options": { "notnull": true, "unsigned": true, "default": 0 }
+				"options": { "notnull": false, "unsigned": true, "default": 0 }
 			},
 			{
 				"name": "cupe_log_type",
@@ -312,6 +307,12 @@
 				"options": { "notnull": false, "length": 255 }
 			},
 			{
+				"name": "cupe_agent_id",
+				"comment": "Foreign key to cu_useragent table on the cuua_id field. Represents the user agent string used for this log event.",
+				"type": "bigint",
+				"options": { "notnull": true, "unsigned": true, "default": 0 }
+			},
+			{
 				"name": "cupe_private",
 				"comment": "Private Data",
 				"type": "blob",
@@ -341,6 +342,33 @@
 			}
 		],
 		"pk": [ "cupe_id" ]
+	},
+	{
+		"name": "cu_useragent",
+		"comment": "The user agent string header provided by the browser for requests is stored here for de-duplication. There MAY be rows with the same user agent string.",
+		"columns": [
+			{
+				"name": "cuua_id",
+				"comment": "Unique ID to identify each user agent",
+				"type": "bigint",
+				"options": { "unsigned": true, "notnull": true, "autoincrement": true }
+			},
+			{
+				"name": "cuua_text",
+				"comment": "The user agent string",
+				"type": "binary",
+				"options": { "notnull": true, "length": 255 }
+			}
+		],
+		"indexes": [
+			{
+				"name": "cuua_text",
+				"columns": [ "cuua_text" ],
+				"unique": false,
+				"comment": "Used to find rows with a given user agent string when attempting to insert a new row to one of cu_changes, cu_log_event, cu_private_event, or cu_private_event_no_actor."
+			}
+		],
+		"pk": [ "cuua_id" ]
 	},
 	{
 		"name": "cu_useragent_clienthints",
@@ -440,6 +468,26 @@
 				"options": {
 					"unsigned": true,
 					"notnull": true
+				}
+			},
+			{
+				"name": "cul_result_id",
+				"comment": "Comment summarising the result of the check associated with this log entry.",
+				"type": "bigint",
+				"options": {
+					"unsigned": true,
+					"notnull": true,
+					"default": 0
+				}
+			},
+			{
+				"name": "cul_result_plaintext_id",
+				"comment": "Plaintext version of the comment summarising the result of the check associated with this log entry.",
+				"type": "bigint",
+				"options": {
+					"unsigned": true,
+					"notnull": true,
+					"default": 0
 				}
 			},
 			{

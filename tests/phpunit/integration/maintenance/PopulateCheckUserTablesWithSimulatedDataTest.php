@@ -3,14 +3,13 @@
 namespace MediaWiki\CheckUser\Tests\Integration\Maintenance;
 
 use MediaWiki\CheckUser\ClientHints\ClientHintsData;
-use MediaWiki\CheckUser\Hooks;
+use MediaWiki\CheckUser\HookHandler\RecentChangeSaveHandler;
 use MediaWiki\CheckUser\Maintenance\PopulateCheckUserTablesWithSimulatedData;
 use MediaWiki\CheckUser\Tests\Integration\CheckUserCommonTraitTest;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Context\RequestContext;
 use MediaWiki\Request\FauxRequest;
 use MediaWiki\Tests\Maintenance\MaintenanceBaseTestCase;
-use RequestContext;
-use User;
+use MediaWiki\User\User;
 use Wikimedia\TestingAccessWrapper;
 
 /**
@@ -21,24 +20,6 @@ use Wikimedia\TestingAccessWrapper;
  */
 class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCase {
 	use CheckUserCommonTraitTest;
-
-	/** @inheritDoc */
-	public function setUp(): void {
-		parent::setUp();
-
-		$this->tablesUsed = [
-			'cu_changes',
-			'cu_private_event',
-			'cu_log_event',
-			'cu_useragent_clienthints',
-			'cu_useragent_clienthints_map',
-			'recentchanges',
-			'page',
-			'logging',
-			'user',
-			'actor',
-		];
-	}
 
 	/** @inheritDoc */
 	protected function getMaintenanceClass() {
@@ -72,7 +53,11 @@ class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCa
 		}
 		$mockObject->mainRequest = new FauxRequest();
 		RequestContext::getMain()->setRequest( $mockObject->mainRequest );
-		$mockObject->hooks = new Hooks();
+		$mockObject->recentChangeSaveHandler = new RecentChangeSaveHandler(
+			$this->getServiceContainer()->get( 'CheckUserInsert' ),
+			$this->getServiceContainer()->getJobQueueGroup(),
+			$this->getServiceContainer()->getConnectionProvider()
+		);
 		return $mockObject;
 	}
 
@@ -166,9 +151,7 @@ class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCa
 				0,
 				array_filter(
 					array_keys( array_filter( $mockObject->mainRequest->getAllHeaders() ) ),
-					static function ( $headerName ) {
-						return substr( $headerName, 0, 9 ) === 'SEC-CH-UA';
-					}
+					static fn ( $headerName ) => str_starts_with( $headerName, 'SEC-CH-UA' )
 				),
 				'Client Hints headers were set for the request when the client does not support Client Hints.'
 			);
@@ -194,9 +177,7 @@ class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCa
 				),
 				array_filter(
 					array_keys( array_filter( $mockObject->mainRequest->getAllHeaders() ) ),
-					static function ( $headerName ) {
-						return substr( $headerName, 0, 9 ) === 'SEC-CH-UA';
-					}
+					static fn ( $headerName ) => str_starts_with( $headerName, 'SEC-CH-UA' )
 				),
 				false,
 				false,
@@ -240,9 +221,6 @@ class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCa
 
 	/** @dataProvider provideLogActions */
 	public function testSimulateLogAction( $type, $action ) {
-		// Can be removed once T342428 is solved, as that task will stop the log entry for the creation
-		// of the test page.
-		$this->truncateTables( [ 'logging', 'cu_log_event', 'cu_changes' ] );
 		$mockObject = $this->getMockedMaintenance();
 		$testUser = $this->getTestUser()->getUserIdentity();
 		$mockObject->simulateLogAction( $type, $action, $testUser );
@@ -252,22 +230,12 @@ class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCa
 			'*',
 			'Should be one log event in the logging table.'
 		);
-		if ( $mockObject->getConfig()->get( 'CheckUserEventTablesMigrationStage' ) & SCHEMA_COMPAT_WRITE_NEW ) {
-			$this->assertRowCount(
-				1,
-				'cu_log_event',
-				'*',
-				'There should one log event in cu_log_event.'
-			);
-		}
-		if ( $mockObject->getConfig()->get( 'CheckUserEventTablesMigrationStage' ) & SCHEMA_COMPAT_WRITE_OLD ) {
-			$this->assertRowCount(
-				1,
-				'cu_changes',
-				'*',
-				'There should one log event in cu_log_event.'
-			);
-		}
+		$this->assertRowCount(
+			1,
+			'cu_log_event',
+			'*',
+			'There should one log event in cu_log_event.'
+		);
 	}
 
 	public static function provideLogActions() {
@@ -293,7 +261,7 @@ class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCa
 			$revisionId,
 			'Revision ID should not be null.'
 		);
-		$revisionRecord = MediaWikiServices::getInstance()->getRevisionStore()->getRevisionById( $revisionId );
+		$revisionRecord = $this->getServiceContainer()->getRevisionStore()->getRevisionById( $revisionId );
 		$this->assertTrue(
 			$revisionRecord->getUser()->equals( $testUser ),
 			'Revision was not saved using the correct user.'
@@ -313,7 +281,7 @@ class PopulateCheckUserTablesWithSimulatedDataTest extends MaintenanceBaseTestCa
 	}
 
 	public function testExecuteFailsWhenDevelopmentModeIsOff() {
-		$this->setMwGlobals( 'wgCheckUserDeveloperMode', false );
+		$this->overrideConfigValue( 'CheckUserDeveloperMode', false );
 		$objectUnderTest = $this->createPartialMock( $this->getMaintenanceClass(), [ 'fatalError' ] );
 		$objectUnderTest->expects( $this->once() )
 			->method( 'fatalError' )

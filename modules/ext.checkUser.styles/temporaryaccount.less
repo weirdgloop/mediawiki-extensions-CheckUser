@@ -7,7 +7,7 @@
 	min-height: 0;
 	margin-top: -8px;
 	margin-bottom: -6px;
-	margin-right: -5px;
+	margin-right: 0;
 }
 
 // Subtitle styles set a smaller line height
@@ -40,4 +40,18 @@
 span.ext-checkuser-tempaccount-reveal-ip-button,
 .ext-checkuser-tempaccount-reveal-ip {
 	font-style: normal;
+}
+
+@media print {
+	// Need high specificity to override OOUI button defaults.
+	.oo-ui-buttonElement.ext-checkuser-tempaccount-reveal-ip-button {
+		&&::before {
+			content: ' ';
+			white-space: pre;
+		}
+
+		> .oo-ui-buttonElement-button {
+			display: none;
+		}
+	}
 }

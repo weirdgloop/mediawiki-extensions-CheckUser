@@ -2,7 +2,11 @@
 
 namespace MediaWiki\CheckUser\Tests\Integration\CheckUser\Pagers;
 
+use MediaWiki\CheckUser\HookHandler\Preferences;
+use MediaWiki\Context\RequestContext;
+use MediaWiki\Extension\GlobalBlocking\GlobalBlockingServices;
 use MediaWiki\Html\FormOptions;
+use MediaWiki\MainConfigNames;
 use MediaWiki\Tests\Unit\Permissions\MockAuthorityTrait;
 use MediaWiki\User\UserIdentityValue;
 use MediaWikiIntegrationTestCase;
@@ -25,28 +29,9 @@ class AbstractCheckUserPagerTest extends MediaWikiIntegrationTestCase {
 	protected function setUp(): void {
 		parent::setUp();
 
-		$this->tablesUsed = array_merge(
-			$this->tablesUsed,
-			[
-				'page',
-				'actor',
-				'revision',
-				'ip_changes',
-				'text',
-				'archive',
-				'recentchanges',
-				'logging',
-				'page_props',
-				'cu_changes',
-				'cu_log',
-			]
-		);
-
-		$this->setMwGlobals( [
-			'wgCheckUserCIDRLimit' => [
-				'IPv4' => 16,
-				'IPv6' => 19,
-			]
+		$this->overrideConfigValue( 'CheckUserCIDRLimit', [
+			'IPv4' => 16,
+			'IPv6' => 19,
 		] );
 	}
 
@@ -68,9 +53,10 @@ class AbstractCheckUserPagerTest extends MediaWikiIntegrationTestCase {
 			$services->getDBLoadBalancerFactory(),
 			$services->getSpecialPageFactory(),
 			$services->getUserIdentityLookup(),
-			$services->getActorMigration(),
 			$services->getService( 'CheckUserLogService' ),
-			$services->getUserFactory()
+			$services->getUserFactory(),
+			$services->get( 'CheckUserLookupUtils' ),
+			$services->getUserOptionsLookup()
 		];
 	}
 
@@ -79,6 +65,7 @@ class AbstractCheckUserPagerTest extends MediaWikiIntegrationTestCase {
 	 * @return TestingAccessWrapper
 	 */
 	protected function setUpObject( $params = [] ) {
+		RequestContext::getMain()->setUser( $this->getTestUser( 'checkuser' )->getUser() );
 		$object = new DeAbstractedCheckUserPagerTest(
 			...$this->setUpObjectArguments( $params )
 		);
@@ -137,6 +124,41 @@ class AbstractCheckUserPagerTest extends MediaWikiIntegrationTestCase {
 		);
 	}
 
+	public function testUserBlockFlagsForGloballyBlockedIP() {
+		$this->markTestSkippedIfExtensionNotLoaded( 'GlobalBlocking' );
+		$object = $this->setUpObject();
+		$ip = '1.2.3.4';
+		$user = UserIdentityValue::newAnonymous( $ip );
+		// Globally block the IP
+		GlobalBlockingServices::wrap( $this->getServiceContainer() )->getGlobalBlockManager()->block(
+			$ip, 'test', '1 week', $this->getTestUser( [ 'steward' ] )->getUserIdentity()
+		);
+		$this->assertSame(
+			[ '<strong>(' . wfMessage( 'checkuser-gblocked' )->escaped() . ')</strong>' ],
+			$object->userBlockFlags( $ip, $user ),
+			'The checkuser-gblocked flag should have been returned as the IP is globally blocked.'
+		);
+	}
+
+	public function testUserBlockFlagsForGloballyBlockedUser() {
+		// We don't want to test specifically the CentralAuth implementation of the CentralIdLookup. As such, force it
+		// to be the local provider.
+		$this->overrideConfigValue( MainConfigNames::CentralIdLookupProvider, 'local' );
+		$this->markTestSkippedIfExtensionNotLoaded( 'GlobalBlocking' );
+		$object = $this->setUpObject();
+		$ip = '1.2.3.4';
+		$user = $this->getMutableTestUser()->getUserIdentity();
+		// Globally block the test user
+		GlobalBlockingServices::wrap( $this->getServiceContainer() )->getGlobalBlockManager()->block(
+			$user->getName(), 'test', '1 week', $this->getTestUser( [ 'steward' ] )->getUserIdentity()
+		);
+		$this->assertContains(
+			'<strong>(' . wfMessage( 'checkuser-gblocked' )->escaped() . ')</strong>',
+			$object->userBlockFlags( $ip, $user ),
+			'The checkuser-gblocked flag should have been returned as the IP is globally blocked.'
+		);
+	}
+
 	public function testUserBlockFlagsTorExitNode() {
 		$this->markTestSkippedIfExtensionNotLoaded( 'TorBlock' );
 		$object = $this->setUpObject();
@@ -152,7 +174,7 @@ class AbstractCheckUserPagerTest extends MediaWikiIntegrationTestCase {
 
 	/** @dataProvider provideTestFormOptionsLimitValue */
 	public function testFormOptionsLimitValue( $formSubmittedLimit, $maximumLimit, $expectedLimit ) {
-		$this->setMwGlobals( 'wgCheckUserMaximumRowCount', $maximumLimit );
+		$this->overrideConfigValue( 'CheckUserMaximumRowCount', $maximumLimit );
 		$object = $this->setUpObject( [ 'limit' => $formSubmittedLimit ] );
 		$this->assertSame(
 			$expectedLimit,
@@ -171,10 +193,17 @@ class AbstractCheckUserPagerTest extends MediaWikiIntegrationTestCase {
 
 	/** @dataProvider provideGetCheckUserHelperFieldset */
 	public function testGetCheckUserHelperFieldset(
-		$collapseByDefaultConfigValue, $shouldBeByDefaultCollapsed, $resultRowCount
+		$collapseByDefaultConfigValue, $userPreferenceValue, $shouldBeByDefaultCollapsed, $resultRowCount
 	) {
-		$this->setMwGlobals( 'wgCheckUserCollapseCheckUserHelperByDefault', $collapseByDefaultConfigValue );
+		$this->overrideConfigValue( 'CheckUserCollapseCheckUserHelperByDefault', $collapseByDefaultConfigValue );
 		$object = $this->setUpObject();
+		$userOptionsManager = $this->getServiceContainer()->getUserOptionsManager();
+		$userOptionsManager->setOption(
+			RequestContext::getMain()->getUser(),
+			'checkuser-helper-table-collapse-by-default',
+			$userPreferenceValue
+		);
+		$userOptionsManager->saveOptions( RequestContext::getMain()->getUser() );
 		$object->mResult = $this->createMock( IResultWrapper::class );
 		$object->mResult->method( 'numRows' )->willReturn( $resultRowCount );
 		$fieldset = TestingAccessWrapper::newFromObject( $object->getCheckUserHelperFieldset() );
@@ -206,41 +235,32 @@ class AbstractCheckUserPagerTest extends MediaWikiIntegrationTestCase {
 	public static function provideGetCheckUserHelperFieldset() {
 		return [
 			'wgCheckUserCollapseCheckUserHelperByDefault set to true' => [
-				true, true, 1
+				// The value of wgCheckUserCollapseCheckUserHelperByDefault
+				true,
+				// The value for the user's "checkuser-helper-table-collapse-by-default" preference
+				Preferences::CHECKUSER_HELPER_USE_CONFIG_TO_COLLAPSE_BY_DEFAULT,
+				// Whether the summary table should be collapsed by default
+				true,
+				// The number of results in the mResult object
+				1,
 			],
 			'wgCheckUserCollapseCheckUserHelperByDefault set to false' => [
-				false, false, 2
+				false, Preferences::CHECKUSER_HELPER_USE_CONFIG_TO_COLLAPSE_BY_DEFAULT, false, 2,
 			],
 			'wgCheckUserCollapseCheckUserHelperByDefault set to an integer less than the row count' => [
-				3, true, 5
+				3, Preferences::CHECKUSER_HELPER_USE_CONFIG_TO_COLLAPSE_BY_DEFAULT, true, 5,
 			],
 			'wgCheckUserCollapseCheckUserHelperByDefault set to an integer greater than the row count' => [
-				10, false, 3
-			]
-		];
-	}
-
-	/** @dataProvider provideEventMigrationStageValues */
-	public function testEventTableReadNewValue( int $eventTableMigrationStage, bool $expectedValue ) {
-		$this->setMwGlobals( 'wgCheckUserEventTablesMigrationStage', $eventTableMigrationStage );
-		$object = $this->setUpObject();
-		$this->assertSame(
-			$expectedValue,
-			$object->eventTableReadNew,
-			'Event table read new boolean is set incorrectly.'
-		);
-	}
-
-	public static function provideEventMigrationStageValues() {
-		return [
-			'With event table migration set to old' => [ SCHEMA_COMPAT_OLD, false ],
-			'With event table migration set to new' => [ SCHEMA_COMPAT_NEW, true ],
-			'With event table migration set to old and write new' => [
-				SCHEMA_COMPAT_OLD | SCHEMA_COMPAT_WRITE_NEW, false
+				10, Preferences::CHECKUSER_HELPER_USE_CONFIG_TO_COLLAPSE_BY_DEFAULT, false, 3,
 			],
-			'With event table migration set to new and write old' => [
-				SCHEMA_COMPAT_NEW | SCHEMA_COMPAT_WRITE_OLD, true
+			'User preference set to always' => [
+				false, Preferences::CHECKUSER_HELPER_ALWAYS_COLLAPSE_BY_DEFAULT, true, 1,
 			],
+			'User preference set to never' => [
+				true, Preferences::CHECKUSER_HELPER_NEVER_COLLAPSE_BY_DEFAULT, false, 2,
+			],
+			'User preference set to integer less than row count' => [ false, 3, true, 5 ],
+			'User preference set to integer more than row count' => [ true, 10, false, 3 ],
 		];
 	}
 }

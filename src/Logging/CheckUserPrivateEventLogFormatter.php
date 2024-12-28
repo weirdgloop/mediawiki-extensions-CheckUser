@@ -3,11 +3,12 @@
 namespace MediaWiki\CheckUser\Logging;
 
 use InvalidArgumentException;
+use LogEntry;
 use LogFormatter;
 use MediaWiki\Html\Html;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Message\Message;
+use MediaWiki\User\UserFactory;
 use MediaWiki\User\UserRigorOptions;
-use Message;
 
 /**
  * LogFormatter for the rows stored in cu_private_event that are
@@ -16,6 +17,17 @@ use Message;
  * Supports the log types checkuser-private-event/*
  */
 class CheckUserPrivateEventLogFormatter extends LogFormatter {
+
+	private UserFactory $userFactory;
+
+	public function __construct(
+		LogEntry $entry,
+		UserFactory $userFactory
+	) {
+		parent::__construct( $entry );
+		$this->userFactory = $userFactory;
+	}
+
 	/**
 	 * @inheritDoc
 	 */
@@ -38,9 +50,8 @@ class CheckUserPrivateEventLogFormatter extends LogFormatter {
 			} else {
 				$accountName = $this->entry->getParameters()['4::target'];
 			}
-			$userFactory = MediaWikiServices::getInstance()->getUserFactory();
 			// User can be non-existent or invalid in the case of failed login attempts.
-			$user = $userFactory->newFromName( $accountName, UserRigorOptions::RIGOR_NONE );
+			$user = $this->userFactory->newFromName( $accountName, UserRigorOptions::RIGOR_NONE );
 			if ( !$user ) {
 				throw new InvalidArgumentException( "The account name $accountName is not valid." );
 			}
@@ -54,15 +65,15 @@ class CheckUserPrivateEventLogFormatter extends LogFormatter {
 				) );
 				$params[4] = '';
 			} else {
-				// Phan isn't happy unless $this->makeUserLink result is immediately wrapped in Message::rawParam
-				$params[3] = Message::rawParam( $this->makeUserLink( $user ) );
+				$link = $this->makeUserLink( $user );
 				if ( $user->isHidden() ) {
-					$params[3]['raw'] = Html::rawElement(
+					$link = Html::rawElement(
 						'span',
 						[ 'class' => [ 'mw-history-suppressed', 'history-deleted' ] ],
-						$params[3]['raw']
+						$link
 					);
 				}
+				$params[3] = Message::rawParam( $link );
 				$params[4] = $accountName;
 			}
 		} elseif ( $this->entry->getSubtype() == 'email-sent' ) {
@@ -105,9 +116,8 @@ class CheckUserPrivateEventLogFormatter extends LogFormatter {
 			} else {
 				$accountName = $entryParametersForReturn['4::target'];
 			}
-			$userFactory = MediaWikiServices::getInstance()->getUserFactory();
 			// User can be non-existent or invalid in the case of failed login attempts.
-			$user = $userFactory->newFromName( $accountName, UserRigorOptions::RIGOR_NONE );
+			$user = $this->userFactory->newFromName( $accountName, UserRigorOptions::RIGOR_NONE );
 			if ( !$user ) {
 				throw new InvalidArgumentException( "The account name $accountName is not valid." );
 			}

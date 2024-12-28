@@ -2,8 +2,9 @@
 
 namespace MediaWiki\CheckUser\Tests\Integration\Investigate\Services;
 
-use ExtensionRegistry;
+use MediaWiki\Block\DatabaseBlockStoreFactory;
 use MediaWiki\CheckUser\Investigate\Services\PreliminaryCheckService;
+use MediaWiki\Registration\ExtensionRegistry;
 use MediaWiki\User\UserGroupManager;
 use MediaWiki\User\UserGroupManagerFactory;
 use MediaWikiIntegrationTestCase;
@@ -17,6 +18,7 @@ use Wikimedia\Rdbms\SelectQueryBuilder;
  *
  * @group CheckUser
  * @covers \MediaWiki\CheckUser\Investigate\Services\PreliminaryCheckService
+ * @covers \MediaWiki\CheckUser\Investigate\Services\ChangeService
  */
 class PreliminaryCheckServiceTest extends MediaWikiIntegrationTestCase {
 
@@ -50,11 +52,14 @@ class PreliminaryCheckServiceTest extends MediaWikiIntegrationTestCase {
 		$ugmf = $this->createNoOpMock( UserGroupManagerFactory::class, [ 'getUserGroupManager' ] );
 		$ugmf->method( 'getUserGroupManager' )->willReturn( $ugm );
 
+		$bsf = $this->createNoOpMock( DatabaseBlockStoreFactory::class );
+
 		$service = $this->getMockBuilder( PreliminaryCheckService::class )
 			->setConstructorArgs( [
 				$dbProvider,
 				$registry,
 				$ugmf,
+				$bsf,
 				$options['localWikiId']
 			] )
 			->onlyMethods( [ 'isUserBlocked' ] )
@@ -148,6 +153,7 @@ class PreliminaryCheckServiceTest extends MediaWikiIntegrationTestCase {
 			$this->createMock( IConnectionProvider::class ),
 			$registry,
 			$this->createNoOpMock( UserGroupManagerFactory::class ),
+			$this->createNoOpMock( DatabaseBlockStoreFactory::class ),
 			'devwiki'
 		);
 		$result = $service->getQueryInfo( $users );

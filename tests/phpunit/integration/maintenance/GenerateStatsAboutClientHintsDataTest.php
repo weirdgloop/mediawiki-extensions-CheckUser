@@ -5,7 +5,6 @@ namespace MediaWiki\CheckUser\Tests\Integration\Maintenance;
 use MediaWiki\CheckUser\Maintenance\GenerateStatsAboutClientHintsData;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
 use MediaWiki\CheckUser\Tests\CheckUserClientHintsCommonTraitTest;
-use MediaWiki\MediaWikiServices;
 use MediaWiki\Tests\Maintenance\MaintenanceBaseTestCase;
 use MediaWiki\WikiMap\WikiMap;
 
@@ -17,16 +16,6 @@ use MediaWiki\WikiMap\WikiMap;
  */
 class GenerateStatsAboutClientHintsDataTest extends MaintenanceBaseTestCase {
 	use CheckUserClientHintsCommonTraitTest;
-
-	/** @inheritDoc */
-	public function setUp(): void {
-		parent::setUp();
-
-		$this->tablesUsed = [
-			'cu_useragent_clienthints',
-			'cu_useragent_clienthints_map',
-		];
-	}
 
 	protected function getMaintenanceClass() {
 		return GenerateStatsAboutClientHintsData::class;
@@ -82,7 +71,7 @@ class GenerateStatsAboutClientHintsDataTest extends MaintenanceBaseTestCase {
 
 	public function addDBData() {
 		/** @var UserAgentClientHintsManager $services */
-		$services = MediaWikiServices::getInstance()->get( 'UserAgentClientHintsManager' );
+		$services = $this->getServiceContainer()->get( 'UserAgentClientHintsManager' );
 		$exampleClientHintsData = $this->getExampleClientHintsDataObjectFromJsApi();
 		// Insert Client Hints data for reference IDs 1 to 5 (inclusive) using the standard example Client Hints data
 		for ( $i = 1; $i < 6; $i++ ) {
@@ -115,9 +104,10 @@ class GenerateStatsAboutClientHintsDataTest extends MaintenanceBaseTestCase {
 			);
 		}
 		// One invalid map row
-		$this->db->newInsertQueryBuilder()
+		$this->getDb()->newInsertQueryBuilder()
 			->insertInto( 'cu_useragent_clienthints_map' )
-			->rows( [ [ 'uachm_uach_id' => 1234, 'uachm_reference_id' => 1, 'uachm_reference_type' => 0 ] ] )
+			->row( [ 'uachm_uach_id' => 1234, 'uachm_reference_id' => 1, 'uachm_reference_type' => 0 ] )
+			->caller( __METHOD__ )
 			->execute();
 	}
 }

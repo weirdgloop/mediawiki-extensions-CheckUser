@@ -9,7 +9,8 @@ use MediaWiki\Title\Title;
 use MediaWiki\User\ActorStore;
 use MediaWiki\User\UserIdentityValue;
 use MediaWikiUnitTestCase;
-use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Wikimedia\Rdbms\Expression;
 use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\SelectQueryBuilder;
 
@@ -43,7 +44,7 @@ class TemporaryAccountLoggerTest extends MediaWikiUnitTestCase {
 		$logger = $this->getMockBuilder( TemporaryAccountLogger::class )
 			->setConstructorArgs( [
 				$this->createMock( ActorStore::class ),
-				$this->createMock( LoggerInterface::class ),
+				new NullLogger(),
 				$database,
 				24 * 60 * 60,
 			] )
@@ -105,9 +106,11 @@ class TemporaryAccountLoggerTest extends MediaWikiUnitTestCase {
 			->willReturn( $queryBuilder );
 
 		// We don't need to stub IDatabase::timestamp() since it is wrapped in
-		// a call to IDatabase::addQuotes().
-		$database->method( 'addQuotes' )
-			->willReturn( $timestamp );
+		// a call to IDatabase::expr().
+		$timestampExpr = $this->createMock( Expression::class );
+		$timestampExpr->method( 'toSql' )->willReturn( "log_timestamp > $timestamp" );
+		$database->method( 'expr' )
+			->willReturn( $timestampExpr );
 
 		$map = [
 				[
@@ -119,9 +122,9 @@ class TemporaryAccountLoggerTest extends MediaWikiUnitTestCase {
 						"log_actor" => 2,
 						"log_namespace" => 2,
 						"log_title" => $target,
-						0 => "log_timestamp > $timestamp",
+						$timestampExpr,
 					],
-					SelectQueryBuilder::class,
+					'MediaWiki\\CheckUser\\Logging\\TemporaryAccountLogger::debouncedLog',
 					[],
 					[],
 					(int)$isDebounced,
@@ -135,9 +138,9 @@ class TemporaryAccountLoggerTest extends MediaWikiUnitTestCase {
 						"log_actor" => 2,
 						"log_namespace" => 2,
 						"log_title" => $target,
-						0 => "log_timestamp > $timestamp",
+						$timestampExpr,
 					],
-					SelectQueryBuilder::class,
+					'MediaWiki\\CheckUser\\Logging\\TemporaryAccountLogger::debouncedLog',
 					[],
 					[],
 					(int)$isDebounced,
@@ -156,7 +159,7 @@ class TemporaryAccountLoggerTest extends MediaWikiUnitTestCase {
 		$logger = $this->getMockBuilder( TemporaryAccountLogger::class )
 			->setConstructorArgs( [
 				$actorStore,
-				$this->createMock( LoggerInterface::class ),
+				new NullLogger(),
 				$database,
 				24 * 60 * 60,
 			] )
@@ -191,5 +194,46 @@ class TemporaryAccountLoggerTest extends MediaWikiUnitTestCase {
 			$target,
 			(int)wfTimestamp()
 		);
+	}
+
+	/**
+	 * @dataProvider provideLogViewDebounced
+	 */
+	public function testLogFromExternal( bool $isDebounced ) {
+		$name = 'Foo';
+		$performer = new UserIdentityValue( 1, $name );
+		$expectedTarget = Title::makeTitle( NS_USER, $name );
+
+		$database = $this->createMock( IDatabase::class );
+
+		$logger = $this->getMockBuilder( TemporaryAccountLogger::class )
+			->setConstructorArgs( [
+				$this->createMock( ActorStore::class ),
+				new NullLogger(),
+				$database,
+				24 * 60 * 60,
+			] )
+			->onlyMethods( [ 'createManualLogEntry' ] )
+			->getMock();
+
+		$logEntry = $this->createMock( ManualLogEntry::class );
+		$logEntry->expects( $this->once() )
+			->method( 'setPerformer' )
+			->with( $performer );
+
+		$logEntry->expects( $this->once() )
+			->method( 'setTarget' )
+			->with( $expectedTarget );
+
+		$logEntry->expects( $this->once() )
+			->method( 'insert' )
+			->with( $database );
+
+		$logger->expects( $this->once() )
+			->method( 'createManualLogEntry' )
+			->with( 'test' )
+			->willReturn( $logEntry );
+
+		$logger->logFromExternal( $performer, 'Foo', 'test', [], $isDebounced, 0 );
 	}
 }

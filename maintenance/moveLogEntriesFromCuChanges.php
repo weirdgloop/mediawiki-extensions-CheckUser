@@ -3,7 +3,7 @@
 namespace MediaWiki\CheckUser\Maintenance;
 
 use LogEntryBase;
-use LoggedUpdateMaintenance;
+use MediaWiki\Maintenance\LoggedUpdateMaintenance;
 
 $IP = getenv( 'MW_INSTALL_PATH' );
 if ( $IP === false ) {
@@ -42,13 +42,6 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 	protected function doDBUpdates() {
 		$dbw = $this->getDB( DB_PRIMARY );
 
-		$eventTableMigrationStage = $this->getServiceContainer()->getMainConfig()
-			->get( 'CheckUserEventTablesMigrationStage' );
-		if ( !( $eventTableMigrationStage & SCHEMA_COMPAT_WRITE_NEW ) ) {
-			$this->output( "Event table migration config must be set to write new." );
-			return false;
-		}
-
 		// Check if the table is empty
 		$cuChangesRows = $dbw->newSelectQueryBuilder()
 			->table( 'cu_changes' )
@@ -56,6 +49,14 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 			->fetchRowCount();
 		if ( !$cuChangesRows ) {
 			$this->output( "cu_changes is empty; nothing to move.\n" );
+			return true;
+		}
+
+		// If the cuc_only_for_read_old column does not exist in cu_changes, then there cannot be log entries in
+		// cu_changes as the event tables migration is already done. This should be the case on an install on MW
+		// version 1.43 or later.
+		if ( !$dbw->fieldExists( 'cu_changes', 'cuc_only_for_read_old', __METHOD__ ) ) {
+			$this->output( "cu_changes cannot hold log entries; nothing to move.\n" );
 			return true;
 		}
 
@@ -115,8 +116,9 @@ class MoveLogEntriesFromCuChanges extends LoggedUpdateMaintenance {
 					'cuc_private'
 				] )
 				->table( 'cu_changes' )
-				->conds( "cuc_id BETWEEN $blockStart AND $blockEnd" )
 				->where( [
+					$dbw->expr( 'cuc_id', '>=', $blockStart ),
+					$dbw->expr( 'cuc_id', '<=', $blockEnd ),
 					'cuc_type' => RC_LOG,
 					'cuc_only_for_read_old' => 0
 				] )

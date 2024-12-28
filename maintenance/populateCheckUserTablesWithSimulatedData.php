@@ -2,24 +2,23 @@
 
 namespace MediaWiki\CheckUser\Maintenance;
 
-use ContentHandler;
 use MailAddress;
-use Maintenance;
 use ManualLogEntry;
 use MediaWiki\Auth\AuthenticationResponse;
 use MediaWiki\Auth\AuthManager;
 use MediaWiki\CheckUser\ClientHints\ClientHintsData;
-use MediaWiki\CheckUser\Hooks as CheckUserHooks;
+use MediaWiki\CheckUser\HookHandler\CheckUserPrivateEventsHandler;
+use MediaWiki\CheckUser\HookHandler\RecentChangeSaveHandler;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
-use MediaWiki\MainConfigNames;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Content\ContentHandler;
+use MediaWiki\Context\RequestContext;
+use MediaWiki\Maintenance\Maintenance;
 use MediaWiki\Request\FauxRequest;
 use MediaWiki\Title\Title;
+use MediaWiki\User\User;
 use MediaWiki\User\UserIdentity;
 use MediaWiki\User\UserIdentityValue;
 use MediaWiki\User\UserRigorOptions;
-use RequestContext;
-use User;
 use Wikimedia\IPUtils;
 use Wikimedia\Timestamp\ConvertibleTimestamp;
 
@@ -48,15 +47,16 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 	/** @var array<string,?ClientHintsData> */
 	private array $userAgentsToClientHintsMap;
 
-	private CheckUserHooks $hooks;
+	private RecentChangeSaveHandler $recentChangeSaveHandler;
+	private CheckUserPrivateEventsHandler $privateEventsHandler;
 
 	private User $userToEmailAndSendPasswordResetsFor;
 
 	private ?ClientHintsData $currentClientHintsData;
 
-	private array $ipv4Ranges;
+	private array $ipv4Ranges = [];
 
-	private array $ipv6Ranges;
+	private array $ipv6Ranges = [];
 
 	private array $ipsToUse;
 
@@ -64,33 +64,44 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 
 	public function __construct() {
 		parent::__construct();
+		$this->addDescription( 'If you use --num-temp with this script, set ' .
+			'$wgTempAccountNameAcquisitionThrottle to null to avoid rate limiting on ' .
+			'temporary account name acquisitions' );
 		$this->addOption(
 			'num-users',
 			'How many users should be created and used for the simulated actions. ' .
-			'The number of actions performed will roughly be split equally between the users. Default is 10.'
+			'The number of actions performed will roughly be split equally between the users. Default is 10.',
+			false,
+			true
 		);
 		$this->addOption(
 			'num-anon',
 			'How many IPs should be used for the simulated actions. ' .
-			'The number of actions performed will roughly be split equally between the IPs. Default is 5.'
+			'The number of actions performed will roughly be split equally between the IPs. Default is 5.',
+			false,
+			true
 		);
 		$this->addOption(
 			'num-temp',
 			'How many temporary accounts should be used for the simulated actions. ' .
 			'The number of actions performed will roughly be split equally between the temporary accounts.' .
-			'This is ignored if temporary account creation is disabled. If not ignored, the default is 10.'
+			'This is ignored if temporary account creation is disabled. If not ignored, the default is 10.',
+			false,
+			true
 		);
 		$this->addOption(
 			'num-used-ips',
 			'How many IPs to select from the ranges in ranges-for-ips. Must not be smaller than num-anon. ' .
 			'These IPs will be used for anon edits, temporary account and user actions. These will also be used ' .
-			'in the XFF header (if set) for actions. Default is 5.'
+			'in the XFF header (if set) for actions. Default is 5.',
+			false,
+			true
 		);
 		$this->addOption(
 			'ranges-for-ips',
 			'What ranges should the IPs be selected from. Default is one IPv4 and IPv6 range inside ' .
 			'ranges defined as internal.',
-			false, false, false, true
+			false, true, false, true
 		);
 		$this->addArg(
 			'count',
@@ -147,7 +158,8 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 			$this->fatalError( 'Number of anon users making edits should not exceed the number of IPs used.' );
 		}
 
-		if ( !$this->getConfig()->get( MainConfigNames::AutoCreateTempUser )['enabled'] ) {
+		$services = $this->getServiceContainer();
+		if ( !$services->getTempUserConfig()->isEnabled() ) {
 			// Only add temporary users if temporary user creation is enabled.
 			$numTemp = 0;
 		}
@@ -163,8 +175,18 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 		}
 
 		// Start code that can assume it is safe to perform un-reversible testing actions.
-		$this->hooks = new CheckUserHooks();
-		$services = MediaWikiServices::getInstance();
+		$this->privateEventsHandler = new CheckUserPrivateEventsHandler(
+			$services->get( 'CheckUserInsert' ),
+			$this->getConfig(),
+			$services->getUserIdentityLookup(),
+			$services->getUserFactory(),
+			$services->getReadOnlyMode()
+		);
+		$this->recentChangeSaveHandler = new RecentChangeSaveHandler(
+			$services->get( 'CheckUserInsert' ),
+			$services->getJobQueueGroup(),
+			$services->getConnectionProvider()
+		);
 		$userForEmails = $this->createRegisteredUser();
 		if ( $userForEmails === null ) {
 			$this->fatalError(
@@ -234,7 +256,9 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 
 			$this->setNewRandomFakeTime();
 			$lowerLimit = time() - ConvertibleTimestamp::time();
-			$user = $services->getTempUserCreator()->create()->getUser();
+			$user = $services->getTempUserCreator()->create(
+				null, $this->mainRequest
+			)->getUser();
 			// Creating a temporary user creates a log event.
 			$actionsLeft--;
 			$this->output( "Processing temporary user with username {$user->getName()}.\n" );
@@ -290,6 +314,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 		if ( ( !$argument || !intval( $argument ) ) && $argument !== '0' ) {
 			$this->fatalError( "$name must be an integer" );
 		}
+
 		return intval( $argument );
 	}
 
@@ -316,7 +341,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 	 * @return ?User A user that has just been created or null if this failed.
 	 */
 	private function createRegisteredUser(): ?User {
-		$services = MediaWikiServices::getInstance();
+		$services = $this->getServiceContainer();
 		// Find a username that doesn't exist.
 		$attemptsMade = 0;
 		do {
@@ -431,14 +456,21 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 	}
 
 	/**
-	 * Generate a randomly chosen IPv4 or IPv6
-	 * address that sits within the allowed
-	 * ranges. A IPv4 address is returned 50%
-	 * of the time on average.
+	 * Generate a randomly chosen IPv4 or IPv6 address that sits within the allowed ranges.
+	 * If the set of allowed ranges contain both IPv4 and IPv6 ranges, an IPv4 address is returned
+	 * 50% of the time on average.
 	 *
 	 * @return string
 	 */
 	private function generateNewIp(): string {
+		if ( count( $this->ipv4Ranges ) === 0 ) {
+			return $this->generateNewIPv6();
+		}
+
+		if ( count( $this->ipv6Ranges ) === 0 ) {
+			return $this->generateNewIPv4();
+		}
+
 		if ( $this->getRandomFloat() < 0.5 ) {
 			return $this->generateNewIPv4();
 		} else {
@@ -453,7 +485,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 	 * @return string The IP that was chosen
 	 */
 	private function generateNewIPv4(): string {
-		list( $start, $end ) = IPUtils::parseRange( array_rand( array_flip( $this->ipv4Ranges ) ) );
+		[ $start, $end ] = IPUtils::parseRange( array_rand( array_flip( $this->ipv4Ranges ) ) );
 		$start = ip2long( IPUtils::formatHex( $start ) );
 		$end = ip2long( IPUtils::formatHex( $end ) );
 		$ipAsLong = $this->mtRand( $start, $end );
@@ -468,7 +500,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 	 * @return string The IP that was chosen
 	 */
 	private function generateNewIPv6(): string {
-		list( $start, $end ) = IPUtils::parseRange( array_rand( array_flip( $this->ipv6Ranges ) ) );
+		[ $start, $end ] = IPUtils::parseRange( array_rand( array_flip( $this->ipv6Ranges ) ) );
 		$ip = '';
 		$seenDifference = false;
 		$lastOnEdgeOfRange = false;
@@ -540,9 +572,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 		// Unset any existing Client Hints data.
 		$clientHintHeadersToUnset = array_filter(
 			array_keys( $this->mainRequest->getAllHeaders() ),
-			static function ( $headerName ) {
-				return substr( $headerName, 0, 9 ) === 'SEC-CH-UA';
-			}
+			static fn ( $headerName ) => str_starts_with( $headerName, 'SEC-CH-UA' )
 		);
 		foreach ( $clientHintHeadersToUnset as $clientHintHeader ) {
 			$this->mainRequest->setHeaders( [ $clientHintHeader => false ] );
@@ -582,7 +612,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 			// Assign a new user agent and client hints combo 30% of the time
 			$this->getNewUserAgentAndAssociatedClientHints();
 		}
-		$services = MediaWikiServices::getInstance();
+		$services = $this->getServiceContainer();
 		/** @var UserAgentClientHintsManager $userAgentClientHintsManager */
 		$userAgentClientHintsManager = $services->getService( 'UserAgentClientHintsManager' );
 		$actorAsUserObject = $services->getUserFactory()->newFromUserIdentity( $actor );
@@ -600,7 +630,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 			} else {
 				$failReasons[] = "bad password";
 			}
-			$this->hooks->onAuthManagerLoginAuthenticateAudit(
+			$this->privateEventsHandler->onAuthManagerLoginAuthenticateAudit(
 				AuthenticationResponse::newFail( wfMessage( 'test' ), $failReasons ),
 				$actorAsUserObject,
 				$actor->getName(),
@@ -612,7 +642,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 		}
 		if ( $actor->isRegistered() ) {
 			// Simulate a login.
-			$this->hooks->onAuthManagerLoginAuthenticateAudit(
+			$this->privateEventsHandler->onAuthManagerLoginAuthenticateAudit(
 				AuthenticationResponse::newPass( $actor->getName() ),
 				$actorAsUserObject,
 				$actor->getName(),
@@ -667,14 +697,14 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 			$subject = 'Test';
 			$text = wfRandomString();
 			$error = [];
-			$this->hooks->onEmailUser( $to, $from, $subject, $text, $error );
+			$this->privateEventsHandler->onEmailUser( $to, $from, $subject, $text, $error );
 			if ( !$this->incrementAndCheck( $actionsPerformed, $actionsLeft ) ) {
 				return $actionsPerformed;
 			}
 		}
 		// Send password reset 10% of the time.
 		if ( $this->getRandomFloat() < 0.1 ) {
-			$this->hooks->onUser__mailPasswordInternal(
+			$this->privateEventsHandler->onUser__mailPasswordInternal(
 				$actorAsUserObject,
 				RequestContext::getMain()->getRequest()->getIP(),
 				$this->userToEmailAndSendPasswordResetsFor
@@ -691,7 +721,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 				UserRigorOptions::RIGOR_NONE
 			);
 			if ( $anonUser ) {
-				$this->hooks->onUserLogoutComplete( $anonUser, $html, $actor->getName() );
+				$this->privateEventsHandler->onUserLogoutComplete( $anonUser, $html, $actor->getName() );
 			}
 			$this->incrementAndCheck( $actionsPerformed, $actionsLeft );
 		}
@@ -734,7 +764,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 			] );
 		}
 		$id = $logEntry->insert();
-		$this->hooks->onRecentChange_save( $logEntry->getRecentChange( $id ) );
+		$this->recentChangeSaveHandler->onRecentChange_save( $logEntry->getRecentChange( $id ) );
 	}
 
 	/**
@@ -752,7 +782,7 @@ class PopulateCheckUserTablesWithSimulatedData extends Maintenance {
 			// Add minor edit flag 50% of the time.
 			$tags = EDIT_MINOR;
 		}
-		$title = $title ?? Title::newFromText( $this->getPrefix() . wfRandomString() );
+		$title ??= Title::newFromText( $this->getPrefix() . wfRandomString() );
 		if ( !$title ) {
 			return null;
 		}

@@ -2,24 +2,22 @@
 
 namespace MediaWiki\CheckUser\Api\Rest\Handler;
 
-use Config;
 use JobQueueGroup;
-use JobSpecification;
+use MediaWiki\Block\BlockManager;
+use MediaWiki\CheckUser\Jobs\LogTemporaryAccountAccessJob;
+use MediaWiki\Config\Config;
 use MediaWiki\Permissions\PermissionManager;
 use MediaWiki\Rest\LocalizedHttpException;
 use MediaWiki\Rest\Response;
 use MediaWiki\Rest\SimpleHandler;
 use MediaWiki\Rest\TokenAwareHandlerTrait;
-use MediaWiki\Rest\Validator\JsonBodyValidator;
-use MediaWiki\Rest\Validator\UnsupportedContentTypeBodyValidator;
 use MediaWiki\Rest\Validator\Validator;
 use MediaWiki\User\ActorStore;
+use MediaWiki\User\Options\UserOptionsLookup;
 use MediaWiki\User\UserNameUtils;
-use MediaWiki\User\UserOptionsLookup;
 use Wikimedia\Message\MessageValue;
-use Wikimedia\ParamValidator\ParamValidator;
 use Wikimedia\Rdbms\IConnectionProvider;
-use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\IReadableDatabase;
 
 abstract class AbstractTemporaryAccountHandler extends SimpleHandler {
 
@@ -32,6 +30,7 @@ abstract class AbstractTemporaryAccountHandler extends SimpleHandler {
 	protected UserNameUtils $userNameUtils;
 	protected IConnectionProvider $dbProvider;
 	protected ActorStore $actorStore;
+	protected BlockManager $blockManager;
 
 	/**
 	 * @param Config $config
@@ -41,6 +40,7 @@ abstract class AbstractTemporaryAccountHandler extends SimpleHandler {
 	 * @param UserNameUtils $userNameUtils
 	 * @param IConnectionProvider $dbProvider
 	 * @param ActorStore $actorStore
+	 * @param BlockManager $blockManager
 	 */
 	public function __construct(
 		Config $config,
@@ -49,7 +49,8 @@ abstract class AbstractTemporaryAccountHandler extends SimpleHandler {
 		UserOptionsLookup $userOptionsLookup,
 		UserNameUtils $userNameUtils,
 		IConnectionProvider $dbProvider,
-		ActorStore $actorStore
+		ActorStore $actorStore,
+		BlockManager $blockManager
 	) {
 		$this->config = $config;
 		$this->jobQueueGroup = $jobQueueGroup;
@@ -58,12 +59,13 @@ abstract class AbstractTemporaryAccountHandler extends SimpleHandler {
 		$this->userNameUtils = $userNameUtils;
 		$this->dbProvider = $dbProvider;
 		$this->actorStore = $actorStore;
+		$this->blockManager = $blockManager;
 	}
 
 	/**
-	 * @inheritDoc
+	 * Check if the performer has the right to use this API, and throw if not.
 	 */
-	public function run( string $name ): Response {
+	protected function checkPermissions() {
 		if ( !$this->getAuthority()->isNamed() ) {
 			throw new LocalizedHttpException(
 				new MessageValue( 'checkuser-rest-access-denied' ),
@@ -74,11 +76,17 @@ abstract class AbstractTemporaryAccountHandler extends SimpleHandler {
 		if (
 			!$this->permissionManager->userHasRight(
 				$this->getAuthority()->getUser(),
-				'checkuser-temporary-account'
-			) ||
-			!$this->userOptionsLookup->getOption(
-				$this->getAuthority()->getUser(),
-				'checkuser-temporary-account-enable'
+				'checkuser-temporary-account-no-preference'
+			) &&
+			(
+				!$this->permissionManager->userHasRight(
+					$this->getAuthority()->getUser(),
+					'checkuser-temporary-account'
+				) ||
+				!$this->userOptionsLookup->getOption(
+					$this->getAuthority()->getUser(),
+					'checkuser-temporary-account-enable'
+				)
 			)
 		) {
 			throw new LocalizedHttpException(
@@ -93,71 +101,50 @@ abstract class AbstractTemporaryAccountHandler extends SimpleHandler {
 				403
 			);
 		}
+	}
 
-		if ( !$this->userNameUtils->isTemp( $name ) ) {
-			throw new LocalizedHttpException(
-				new MessageValue( 'rest-invalid-user', [ $name ] ),
-				404
-			);
-		}
+	/**
+	 * @inheritDoc
+	 */
+	public function run( $identifier ): Response {
+		$this->checkPermissions();
 
-		$dbr = $this->dbProvider->getReplicaDatabase();
-		$actorId = $this->actorStore->findActorIdByName( $name, $dbr );
-		if ( $actorId === null ) {
-			throw new LocalizedHttpException(
-				new MessageValue( 'rest-nonexistent-user', [ $name ] ),
-				404
-			);
-		}
-
-		$data = $this->getData( $actorId, $dbr );
+		$results = $this->getResults( $identifier );
 
 		$this->jobQueueGroup->push(
-			new JobSpecification(
-				'checkuserLogTemporaryAccountAccess',
-				[
-					'performer' => $this->getAuthority()->getUser()->getName(),
-					'tempUser' => $this->urlEncodeTitle( $name ),
-					'timestamp' => (int)wfTimestamp(),
-				],
-				[],
-				null
+			LogTemporaryAccountAccessJob::newSpec(
+				$this->getAuthority()->getUser(),
+				$this->urlEncodeTitle( $identifier ),
+				$this->getLogType()
 			)
 		);
 
 		$maxAge = $this->config->get( 'CheckUserTemporaryAccountMaxAge' );
-		$response = $this->getResponseFactory()->createJson( $data );
+		$response = $this->getResponseFactory()->createJson( $results );
 		$response->setHeader( 'Cache-Control', "private, max-age=$maxAge" );
 		return $response;
 	}
 
 	/**
-	 * @param int $actorId
-	 * @param IDatabase $dbr
-	 * @return array IP addresses used by the temporary account
+	 * @param string $identifier
+	 * @return array associated IP addresses or temporary accounts
 	 */
-	abstract protected function getData( int $actorId, IDatabase $dbr ): array;
+	abstract protected function getResults( $identifier ): array;
 
 	/**
-	 * @inheritDoc
+	 * @param int|string $identifier
+	 * @param IReadableDatabase $dbr
+	 * @return array associated IP addresses or temporary accounts
 	 */
-	public function getParamSettings() {
-		return [
-			'name' => [
-				self::PARAM_SOURCE => 'path',
-				ParamValidator::PARAM_TYPE => 'string',
-				ParamValidator::PARAM_REQUIRED => true,
-			],
-		];
-	}
+	abstract protected function getData( $identifier, IReadableDatabase $dbr ): array;
 
-	/** @inheritDoc */
-	public function getBodyValidator( $contentType ) {
-		if ( $contentType !== 'application/json' ) {
-			return new UnsupportedContentTypeBodyValidator( $contentType );
-		}
+	/**
+	 * @return string log type to record
+	 */
+	abstract protected function getLogType(): string;
 
-		return new JsonBodyValidator( $this->getTokenParamDefinition() );
+	public function getBodyParamSettings(): array {
+		return $this->getTokenParamDefinition();
 	}
 
 	/** @inheritDoc */

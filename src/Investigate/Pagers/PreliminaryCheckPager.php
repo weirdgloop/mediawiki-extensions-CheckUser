@@ -21,22 +21,22 @@
 
 namespace MediaWiki\CheckUser\Investigate\Pagers;
 
-use ExtensionRegistry;
-use Html;
-use IContextSource;
 use MediaWiki\CheckUser\Investigate\Services\PreliminaryCheckService;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
+use MediaWiki\Context\IContextSource;
 use MediaWiki\Extension\CentralAuth\CentralAuthDatabaseManager;
 use MediaWiki\Extension\CentralAuth\CentralAuthServices;
+use MediaWiki\Html\Html;
 use MediaWiki\Linker\LinkRenderer;
+use MediaWiki\Pager\TablePager;
+use MediaWiki\Registration\ExtensionRegistry;
+use MediaWiki\SpecialPage\SpecialPage;
+use MediaWiki\Title\NamespaceInfo;
 use MediaWiki\User\User;
 use MediaWiki\User\UserFactory;
 use MediaWiki\WikiMap\WikiMap;
-use NamespaceInfo;
-use SpecialPage;
-use TablePager;
 use Wikimedia\Rdbms\FakeResultWrapper;
-use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\IReadableDatabase;
 
 /**
  * @ingroup Pager
@@ -103,7 +103,7 @@ class PreliminaryCheckPager extends TablePager {
 	 */
 	public function getCellAttrs( $field, $value ) {
 		$attributes = parent::getCellAttrs( $field, $value );
-		$attributes['class'] = $attributes['class'] ?? '';
+		$attributes['class'] ??= '';
 
 		switch ( $field ) {
 			case 'wiki':
@@ -284,11 +284,11 @@ class PreliminaryCheckPager extends TablePager {
 	}
 
 	/**
-	 * @return IDatabase|null
+	 * @return IReadableDatabase|null
 	 */
-	protected function getCentralReplicaDB(): ?IDatabase {
+	protected function getCentralReplicaDB(): ?IReadableDatabase {
 		if ( class_exists( CentralAuthDatabaseManager::class ) ) {
-			return CentralAuthServices::getDatabaseManager()->getCentralDB( DB_REPLICA );
+			return CentralAuthServices::getDatabaseManager()->getCentralReplicaDB();
 		}
 		return null;
 	}

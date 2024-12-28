@@ -2,31 +2,31 @@
 
 namespace MediaWiki\CheckUser\CheckUser\Pagers;
 
-use ActorMigration;
-use CentralIdLookup;
-use Exception;
-use ExtensionRegistry;
-use Html;
-use IContextSource;
-use Linker;
-use ListToggle;
 use LogicException;
-use MediaWiki\Block\BlockPermissionCheckerFactory;
 use MediaWiki\CheckUser\CheckUser\SpecialCheckUser;
 use MediaWiki\CheckUser\CheckUser\Widgets\HTMLFieldsetCheckUser;
 use MediaWiki\CheckUser\ClientHints\ClientHintsLookupResults;
 use MediaWiki\CheckUser\ClientHints\ClientHintsReferenceIds;
 use MediaWiki\CheckUser\Services\CheckUserLogService;
+use MediaWiki\CheckUser\Services\CheckUserLookupUtils;
 use MediaWiki\CheckUser\Services\CheckUserUtilityService;
 use MediaWiki\CheckUser\Services\TokenQueryManager;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsFormatter;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsLookup;
 use MediaWiki\CheckUser\Services\UserAgentClientHintsManager;
+use MediaWiki\Config\ConfigException;
+use MediaWiki\Context\IContextSource;
 use MediaWiki\Extension\CentralAuth\User\CentralAuthUser;
 use MediaWiki\Html\FormOptions;
+use MediaWiki\Html\Html;
+use MediaWiki\Html\ListToggle;
+use MediaWiki\Linker\Linker;
 use MediaWiki\Linker\LinkRenderer;
 use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\Registration\ExtensionRegistry;
 use MediaWiki\SpecialPage\SpecialPageFactory;
+use MediaWiki\User\CentralId\CentralIdLookup;
+use MediaWiki\User\Options\UserOptionsLookup;
 use MediaWiki\User\UserEditTracker;
 use MediaWiki\User\UserFactory;
 use MediaWiki\User\UserGroupManager;
@@ -34,13 +34,19 @@ use MediaWiki\User\UserIdentity;
 use MediaWiki\User\UserIdentityLookup;
 use MediaWiki\User\UserIdentityValue;
 use MediaWiki\WikiMap\WikiMap;
+use MediaWiki\Xml\Xml;
 use Wikimedia\IPUtils;
 use Wikimedia\Rdbms\IConnectionProvider;
-use Xml;
 
 class CheckUserGetUsersPager extends AbstractCheckUserPager {
 	/** @var bool Whether the user performing this check has the block right. */
 	protected bool $canPerformBlocks;
+
+	/**
+	 * @var bool|null Lazy-loaded via ::shouldShowBlockFieldset. Whether the block fieldset
+	 *   (and checkboxes next to each result line) should be shown. Null if not yet determined.
+	 */
+	private ?bool $shouldShowBlockFieldset = null;
 
 	/** @var array[] */
 	protected $userSets;
@@ -56,12 +62,12 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 
 	private ClientHintsLookupResults $clientHintsLookupResults;
 
-	private BlockPermissionCheckerFactory $blockPermissionCheckerFactory;
 	private PermissionManager $permissionManager;
 	private UserEditTracker $userEditTracker;
 	private CheckUserUtilityService $checkUserUtilityService;
 	private UserAgentClientHintsLookup $clientHintsLookup;
 	private UserAgentClientHintsFormatter $clientHintsFormatter;
+	private ExtensionRegistry $extensionRegistry;
 
 	/**
 	 * @param FormOptions $opts
@@ -70,19 +76,19 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 	 * @param string $logType
 	 * @param TokenQueryManager $tokenQueryManager
 	 * @param PermissionManager $permissionManager
-	 * @param BlockPermissionCheckerFactory $blockPermissionCheckerFactory
 	 * @param UserGroupManager $userGroupManager
 	 * @param CentralIdLookup $centralIdLookup
 	 * @param IConnectionProvider $dbProvider
 	 * @param SpecialPageFactory $specialPageFactory
 	 * @param UserIdentityLookup $userIdentityLookup
-	 * @param ActorMigration $actorMigration
 	 * @param UserFactory $userFactory
 	 * @param CheckUserLogService $checkUserLogService
+	 * @param CheckUserLookupUtils $checkUserLookupUtils
 	 * @param UserEditTracker $userEditTracker
 	 * @param CheckUserUtilityService $checkUserUtilityService
 	 * @param UserAgentClientHintsLookup $clientHintsLookup
 	 * @param UserAgentClientHintsFormatter $clientHintsFormatter
+	 * @param UserOptionsLookup $userOptionsLookup
 	 * @param IContextSource|null $context
 	 * @param LinkRenderer|null $linkRenderer
 	 * @param ?int $limit
@@ -94,27 +100,27 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		string $logType,
 		TokenQueryManager $tokenQueryManager,
 		PermissionManager $permissionManager,
-		BlockPermissionCheckerFactory $blockPermissionCheckerFactory,
 		UserGroupManager $userGroupManager,
 		CentralIdLookup $centralIdLookup,
 		IConnectionProvider $dbProvider,
 		SpecialPageFactory $specialPageFactory,
 		UserIdentityLookup $userIdentityLookup,
-		ActorMigration $actorMigration,
 		UserFactory $userFactory,
 		CheckUserLogService $checkUserLogService,
+		CheckUserLookupUtils $checkUserLookupUtils,
 		UserEditTracker $userEditTracker,
 		CheckUserUtilityService $checkUserUtilityService,
 		UserAgentClientHintsLookup $clientHintsLookup,
 		UserAgentClientHintsFormatter $clientHintsFormatter,
-		IContextSource $context = null,
-		LinkRenderer $linkRenderer = null,
+		UserOptionsLookup $userOptionsLookup,
+		?IContextSource $context = null,
+		?LinkRenderer $linkRenderer = null,
 		?int $limit = null
 	) {
 		parent::__construct( $opts, $target, $logType, $tokenQueryManager,
 			$userGroupManager, $centralIdLookup, $dbProvider, $specialPageFactory,
-			$userIdentityLookup, $actorMigration, $checkUserLogService, $userFactory,
-			$context, $linkRenderer, $limit );
+			$userIdentityLookup, $checkUserLogService, $userFactory, $checkUserLookupUtils,
+			$userOptionsLookup, $context, $linkRenderer, $limit );
 		$this->checkType = SpecialCheckUser::SUBTYPE_GET_USERS;
 		$this->xfor = $xfor;
 		$this->canPerformBlocks = $permissionManager->userHasRight( $this->getUser(), 'block' )
@@ -124,12 +130,12 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		$this->globalBlockingToollink = ExtensionRegistry::getInstance()->isLoaded( 'GlobalBlocking' )
 			? $this->getConfig()->get( 'CheckUserGBtoollink' ) : false;
 		$this->aliases = $this->getLanguage()->getSpecialPageAliases();
-		$this->blockPermissionCheckerFactory = $blockPermissionCheckerFactory;
 		$this->permissionManager = $permissionManager;
 		$this->userEditTracker = $userEditTracker;
 		$this->checkUserUtilityService = $checkUserUtilityService;
 		$this->clientHintsLookup = $clientHintsLookup;
 		$this->clientHintsFormatter = $clientHintsFormatter;
+		$this->extensionRegistry = ExtensionRegistry::getInstance();
 	}
 
 	/**
@@ -195,7 +201,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		if ( $hidden ) {
 			// User is hidden from the current authority, so the current authority cannot block this user either.
 			// As such, the checkbox (used for blocking the user) should not be shown.
-			$templateParams['canPerformBlocks'] = false;
+			$templateParams['canPerformBlocksOrLocks'] = false;
 			$templateParams['userText'] = '';
 			$templateParams['userLink'] = Html::element(
 				'span',
@@ -203,7 +209,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				$this->msg( 'rev-deleted-user' )->text()
 			);
 		} else {
-			$templateParams['canPerformBlocks'] = $this->canPerformBlocks;
+			$templateParams['canPerformBlocksOrLocks'] = $this->shouldShowBlockFieldset();
 			$templateParams['userText'] = $user->getName();
 			$userNonExistent = !IPUtils::isIPAddress( $user ) && !$user->isRegistered();
 			if ( $userNonExistent ) {
@@ -239,7 +245,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 					'Special:CentralAuth'
 				);
 				if ( $centralCAUrl === false ) {
-					throw new Exception(
+					throw new ConfigException(
 						"Could not retrieve URL for CentralAuth: $this->centralAuthToollink"
 					);
 				}
@@ -253,9 +259,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				$templateParams['centralAuthLink'] = $this->msg( 'parentheses' )->rawParams( $linkCA )->escaped();
 			}
 			// Add GlobalBlocking link to CentralWiki
-			if ( $this->globalBlockingToollink !== false
-				&& IPUtils::isIPAddress( $user )
-			) {
+			if ( $this->globalBlockingToollink !== false ) {
 				// Get GlobalBlock SpecialPage name in UserLang from the first Alias name
 				$centralGBUrl = WikiMap::getForeignURL(
 					$this->globalBlockingToollink['centralDB'],
@@ -263,41 +267,19 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				);
 				$spgb = $this->aliases['GlobalBlock'][0];
 				$gblinkAlias = str_replace( '_', ' ', $spgb );
-				if ( ExtensionRegistry::getInstance()->isLoaded( 'CentralAuth' ) ) {
+				if ( $this->extensionRegistry->isLoaded( 'CentralAuth' ) ) {
+					// If CentralAuth is installed, we can ue the global groups of the CentralUser.
 					$gbUserGroups = CentralAuthUser::getInstance( $this->getUser() )->getGlobalGroups();
-					// Link to GB via WikiMap since CA require it
-					if ( $centralGBUrl === false ) {
-						throw new Exception(
-							'Could not retrieve URL for global blocking toollink'
-						);
-					}
-					$linkGB = Html::element( 'a',
-						[
-							'href' => $centralGBUrl . "/" . $user,
-							'title' => $this->msg( 'globalblocking-block-submit' )->text(),
-						],
-						$gblinkAlias
-					);
 				} elseif ( $centralGBUrl !== false ) {
 					// Case wikimap configured without CentralAuth extension
 					// Get effective Local user groups since there is a wikimap but there is no CA
 					$gbUserGroups = $this->userGroupManager->getUserEffectiveGroups( $this->getUser() );
-					$linkGB = Html::element( 'a',
-						[
-							'href' => $centralGBUrl . "/" . $user,
-							'title' => $this->msg( 'globalblocking-block-submit' )->text(),
-						],
-						$gblinkAlias
-					);
 				} else {
-					// Load local user group instead
+					// If CentralAuth is not installed and also if the central Special:GlobalBlock page failed to be
+					// generated, then check that the user has the globalblock right locally instead of the user group
+					// check.
 					$gbUserGroups = [ '' ];
-					$gbtitle = $this->getPageTitle( 'GlobalBlock' );
-					$linkGB = $this->getLinkRenderer()->makeKnownLink(
-						$gbtitle,
-						$gblinkAlias,
-						[ 'title' => $this->msg( 'globalblocking-block-submit' ) ]
-					);
+
 					$gbUserCanDo = $this->permissionManager->userHasRight( $this->getUser(), 'globalblock' );
 					if ( $gbUserCanDo ) {
 						$this->globalBlockingToollink['groups'] = $gbUserGroups;
@@ -306,7 +288,25 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				// Only load the script for users in the configured global(local) group(s) or
 				// for local user with globalblock permission if there is no WikiMap
 				if ( count( array_intersect( $this->globalBlockingToollink['groups'], $gbUserGroups ) ) ) {
-					$templateParams['globalBlockLink'] .= $this->msg( 'parentheses' )->rawParams( $linkGB )->escaped();
+					if ( $centralGBUrl !== false ) {
+						$linkGB = Html::element( 'a',
+							[
+								'href' => $centralGBUrl . "/" . $user,
+								'title' => $this->msg( 'globalblocking-block-submit-new' )->text(),
+							],
+							$gblinkAlias
+						);
+					} else {
+						// If we could not generate the URL for Special:GlobalBlock on the central wiki, we should be
+						// able to use the local Special:GlobalBlock page as a backup.
+						$gbtitle = $this->getPageTitle( 'GlobalBlock' );
+						$linkGB = $this->getLinkRenderer()->makeKnownLink(
+							$gbtitle,
+							$gblinkAlias,
+							[ 'title' => $this->msg( 'globalblocking-block-submit-new' ) ]
+						);
+					}
+					$templateParams['globalBlockLink'] = $this->msg( 'parentheses' )->rawParams( $linkGB )->escaped();
 				}
 			}
 			// Check if this user or IP is blocked. If so, give a link to the block log...
@@ -395,6 +395,11 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		$referenceIdsForLookup = new ClientHintsReferenceIds();
 
 		foreach ( $result as $row ) {
+			// Use the IP as the user_text if the actor ID is NULL and the IP is not NULL (T353953).
+			if ( $row->actor === null && $row->ip ) {
+				$row->user_text = $row->ip;
+			}
+
 			if ( !array_key_exists( $row->user_text, $this->userSets['edits'] ) ) {
 				$this->userSets['last'][$row->user_text] = $row->timestamp;
 				$this->userSets['edits'][$row->user_text] = 0;
@@ -459,10 +464,12 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		}
 
 		// Apply index and IP WHERE conditions.
-		$queryInfo['options']['USE INDEX'] = [ $table => $this->getIndexName( $table ) ];
-		$ipConds = self::getIpConds( $this->mDb, $this->target->getName(), $this->xfor, $table );
-		if ( $ipConds ) {
-			$queryInfo['conds'] = array_merge( $queryInfo['conds'], $ipConds );
+		$queryInfo['options']['USE INDEX'] = [
+			$table => $this->checkUserLookupUtils->getIndexName( $this->xfor, $table )
+		];
+		$ipExpr = $this->checkUserLookupUtils->getIPTargetExpr( $this->target->getName(), $this->xfor, $table );
+		if ( $ipExpr !== null ) {
+			$queryInfo['conds'][] = $ipExpr;
 		}
 
 		return $queryInfo;
@@ -476,6 +483,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				'ip' => 'cuc_ip',
 				'agent' => 'cuc_agent',
 				'xff' => 'cuc_xff',
+				'actor' => 'cuc_actor',
 				'user' => 'actor_cuc_actor.actor_user',
 				'user_text' => 'actor_cuc_actor.actor_name',
 			],
@@ -484,11 +492,6 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 			'join_conds' => [ 'actor_cuc_actor' => [ 'JOIN', 'actor_cuc_actor.actor_id=cuc_actor' ] ],
 			'options' => [],
 		];
-		// When reading new, only select results from cu_changes that are
-		// for read new (defined as those with cuc_only_for_read_old set to 0).
-		if ( $this->eventTableReadNew ) {
-			$queryInfo['conds']['cuc_only_for_read_old'] = 0;
-		}
 		// When displaying Client Hints data, add the reference type and reference ID to each row.
 		if ( $this->displayClientHints ) {
 			$queryInfo['fields']['client_hints_reference_id'] =
@@ -509,6 +512,7 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				'ip' => 'cule_ip',
 				'agent' => 'cule_agent',
 				'xff' => 'cule_xff',
+				'actor' => 'cule_actor',
 				'user' => 'actor_cule_actor.actor_user',
 				'user_text' => 'actor_cule_actor.actor_name',
 			],
@@ -537,12 +541,13 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 				'ip' => 'cupe_ip',
 				'agent' => 'cupe_agent',
 				'xff' => 'cupe_xff',
+				'actor' => 'cupe_actor',
 				'user' => 'actor_cupe_actor.actor_user',
 				'user_text' => 'actor_cupe_actor.actor_name',
 			],
 			'tables' => [ 'cu_private_event', 'actor_cupe_actor' => 'actor' ],
 			'conds' => [],
-			'join_conds' => [ 'actor_cupe_actor' => [ 'JOIN', 'actor_cupe_actor.actor_id=cupe_actor' ] ],
+			'join_conds' => [ 'actor_cupe_actor' => [ 'LEFT JOIN', 'actor_cupe_actor.actor_id=cupe_actor' ] ],
 			'options' => [],
 		];
 		// When displaying Client Hints data, add the reference type and reference ID to each row.
@@ -562,18 +567,6 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		$s = $this->getCheckUserHelperFieldsetHTML() . $this->getNavigationBar();
 		if ( $this->mResult->numRows() ) {
 			$s .= ( new ListToggle( $this->getOutput() ) )->getHTML();
-		}
-		if ( $this->canPerformBlocks ) {
-			$s .= Xml::openElement(
-				'form',
-				[
-					'action' => $this->getPageTitle()->getLocalURL( 'action=block' ),
-					'id' => 'checkuserblock',
-					'name' => 'checkuserblock',
-					'class' => 'mw-htmlform-ooui mw-htmlform',
-					'method' => 'post',
-				]
-			);
 		}
 
 		$divClasses = [ 'mw-checkuser-get-users-results' ];
@@ -598,136 +591,84 @@ class CheckUserGetUsersPager extends AbstractCheckUserPager {
 		return $s;
 	}
 
+	/**
+	 * Should the block fieldset and checkboxes be shown to the user. Has non-trivial side-effects
+	 * (e.g. adding JS modules), but calling this method more than once does not repeat the side-effects.
+	 *
+	 * @return bool Whether the block fieldset should be added to the bottom of the results, and also whether the
+	 *   checkboxes next to each result line should be shown.
+	 */
+	private function shouldShowBlockFieldset(): bool {
+		// If this method has already been called, return the cached value.
+		if ( $this->shouldShowBlockFieldset !== null ) {
+			return $this->shouldShowBlockFieldset;
+		}
+		// Add links to the MultiLock tool if the user can use it.
+		$checkUserCAMultiLock = $this->getConfig()->get( 'CheckUserCAMultiLock' );
+		if ( $checkUserCAMultiLock !== false ) {
+			if ( !$this->extensionRegistry->isLoaded( 'CentralAuth' ) ) {
+				// $wgCheckUserCAMultiLock shouldn't be enabled if CA is not loaded
+				throw new ConfigException( '$wgCheckUserCAMultiLock requires CentralAuth extension.' );
+			}
+
+			$caUserGroups = CentralAuthUser::getInstance( $this->getUser() )->getGlobalGroups();
+			// Only load the script for users in the configured global group(s)
+			if ( count( array_intersect( $checkUserCAMultiLock['groups'], $caUserGroups ) ) ) {
+				$centralMLUrl = WikiMap::getForeignURL(
+					$checkUserCAMultiLock['centralDB'],
+					// Use canonical name instead of local name so that it works
+					// even if the local language is different from central wiki
+					'Special:MultiLock'
+				);
+				if ( $centralMLUrl === false ) {
+					throw new ConfigException(
+						"Could not retrieve URL for {$checkUserCAMultiLock['centralDB']}"
+					);
+				}
+				$this->getOutput()->addJsConfigVars( 'wgCUCAMultiLockCentral', $centralMLUrl );
+				$this->getOutput()->addModules( 'ext.checkUser' );
+				// Always show the block form if links to Special:MultiLock are going to be added to the page.
+				$this->shouldShowBlockFieldset = true;
+				return $this->shouldShowBlockFieldset;
+			}
+		}
+		// If the Special:MultiLock links are not being added, then only show the block form if the user can
+		// perform blocks on the local wiki.
+		$this->shouldShowBlockFieldset = $this->canPerformBlocks;
+		return $this->shouldShowBlockFieldset;
+	}
+
 	/** @inheritDoc */
 	protected function getEndBody(): string {
-		$fieldset = new HTMLFieldsetCheckUser( [], $this->getContext(), '' );
 		$s = '</ul></div>';
 		if ( $this->mResult->numRows() ) {
 			$s .= ( new ListToggle( $this->getOutput() ) )->getHTML();
 		}
-		// T314217 - cannot have forms inside of forms.
-		// $s .= $this->getNavigationBar();
-		if ( $this->canPerformBlocks ) {
-			$config = $this->getConfig();
-			$checkUserCAMultiLock = $config->get( 'CheckUserCAMultiLock' );
-			if ( $checkUserCAMultiLock !== false ) {
-				if ( !ExtensionRegistry::getInstance()->isLoaded( 'CentralAuth' ) ) {
-					// $wgCheckUserCAMultiLock shouldn't be enabled if CA is not loaded
-					throw new Exception( '$wgCheckUserCAMultiLock requires CentralAuth extension.' );
-				}
-
-				$caUserGroups = CentralAuthUser::getInstance( $this->getUser() )->getGlobalGroups();
-				// Only load the script for users in the configured global group(s)
-				if ( count( array_intersect( $checkUserCAMultiLock['groups'], $caUserGroups ) ) ) {
-					$out = $this->getOutput();
-					$centralMLUrl = WikiMap::getForeignURL(
-						$checkUserCAMultiLock['centralDB'],
-						// Use canonical name instead of local name so that it works
-						// even if the local language is different from central wiki
-						'Special:MultiLock'
-					);
-					if ( $centralMLUrl === false ) {
-						throw new Exception(
-							"Could not retrieve URL for {$checkUserCAMultiLock['centralDB']}"
-						);
-					}
-					$out->addJsConfigVars( 'wgCUCAMultiLockCentral', $centralMLUrl );
-					$out->addModules( 'ext.checkUser' );
-				}
-			}
-
-			$fields = [
-				'usetag' => [
-					'type' => 'check',
-					'default' => false,
-					'label-message' => 'checkuser-blocktag',
-					'id' => 'usetag',
-					'name' => 'usetag',
-					'size' => 46,
-				],
-				'tag' => [
-					'type' => 'text',
-					'id' => 'blocktag',
-					'name' => 'blocktag',
-					'minlength' => 3,
-				],
-				'talkusetag' => [
-					'type' => 'check',
-					'default' => false,
-					'label-message' => 'checkuser-blocktag-talk',
-					'id' => 'usettag',
-					'name' => 'usettag',
-				],
-				'talktag' => [
-					'type' => 'text',
-					'id' => 'talktag',
-					'name' => 'talktag',
-					'size' => 46,
-					'minlength' => 3,
-				],
-			];
-
-			$fieldset->addFields( $fields )
-				->setWrapperLegendMsg( 'checkuser-massblock' )
-				->setSubmitTextMsg( 'checkuser-massblock-commit' )
-				->setSubmitId( 'checkuserblocksubmit' )
-				->setSubmitName( 'checkuserblock' )
-				->setHeaderHtml( $this->msg( 'checkuser-massblock-text' )->escaped() );
-
-			if ( $config->get( 'BlockAllowsUTEdit' ) ) {
+		$s .= $this->getNavigationBar();
+		if ( $this->shouldShowBlockFieldset() ) {
+			$fieldset = new HTMLFieldsetCheckUser( [], $this->getContext(), '' );
+			$fieldset->outerClass = 'mw-checkuser-massblock';
+			if ( $this->canPerformBlocks ) {
 				$fieldset->addFields( [
-					'blocktalk' => [
-						'type' => 'check',
-						'default' => false,
-						'label-message' => 'checkuser-blocktalk',
-						'id' => 'blocktalk',
-						'name' => 'blocktalk',
-					]
-				] );
+					'block-accounts-button' => [
+						'type' => 'submit',
+						'buttonlabel-message' => 'checkuser-massblock-commit-accounts',
+						'cssclass' => 'mw-checkuser-massblock-accounts-button mw-checkuser-massblock-button',
+					],
+					'block-ips-button' => [
+						'type' => 'submit',
+						'buttonlabel-message' => 'checkuser-massblock-commit-ips',
+						'cssclass' => 'mw-checkuser-massblock-ips-button mw-checkuser-massblock-button',
+					],
+				] )->setHeaderHtml( $this->msg( 'checkuser-massblock-text' )->escaped() );
+			} else {
+				$fieldset->setHeaderHtml( $this->msg( 'checkuser-massblock-text-multi-lock-only' )->escaped() );
 			}
 
-			if (
-				$this->blockPermissionCheckerFactory
-					->newBlockPermissionChecker(
-						null,
-						$this->getUser()
-					)
-					->checkEmailPermissions()
-			) {
-				$fieldset->addFields( [
-					'blockemail' => [
-						'type' => 'check',
-						'default' => false,
-						'label-message' => 'checkuser-blockemail',
-						'id' => 'blockemail',
-						'name' => 'blockemail',
-					]
-				] );
-			}
-
-			$s .= $fieldset
-				->addFields( [
-					'reblock' => [
-						'type' => 'check',
-						'default' => false,
-						'label-message' => 'checkuser-reblock',
-						'id' => 'reblock',
-						'name' => 'reblock',
-					],
-					'reason' => [
-						'type' => 'selectandother',
-						'options-message' => 'checkuser-block-reason-dropdown',
-						'label-message' => 'checkuser-reason',
-						'size' => 46,
-						'maxlength' => 150,
-						'id' => 'blockreason',
-						'name' => 'blockreason',
-						'cssclass' => 'ext-checkuser-checkuserblock-block-reason'
-					],
-				] )
+			$s .= $fieldset->setWrapperLegendMsg( 'checkuser-massblock' )
+				->suppressDefaultSubmit()
 				->prepareForm()
 				->getHtml( false );
-			$s .= '</form>';
 		}
 
 		return $s;

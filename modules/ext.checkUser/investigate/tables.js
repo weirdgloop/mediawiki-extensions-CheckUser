@@ -1,11 +1,11 @@
-var InvestigateMenuSelectWidget = require( './InvestigateMenuSelectWidget.js' );
+const InvestigateMenuSelectWidget = require( './InvestigateMenuSelectWidget.js' );
 
 /**
  * Add highlight pinning capability and tool links to tables.
  */
 module.exports = function setupTables() {
 	// Attributes used for pinnable highlighting
-	var highlightData = mw.storage.session.get( 'checkuser-investigate-highlight' ),
+	const highlightData = mw.storage.session.get( 'checkuser-investigate-highlight' ),
 		toggleButtons = {};
 
 	// The message 'checkuser-toollinks' was parsed in PHP, since translations
@@ -25,13 +25,12 @@ module.exports = function setupTables() {
 	}
 
 	function updateMatchingElements( $target, value, classSuffix ) {
-		var $matches,
-			dataField = $target.data( 'field' ),
+		const dataField = $target.data( 'field' ),
 			dataValue = $target.data( 'value' ),
 			cellClass = 'ext-checkuser-investigate-table-cell-' + classSuffix,
 			rowClass = 'ext-checkuser-investigate-table-row-' + classSuffix;
 
-		$matches = $( 'td[data-field="' + dataField + '"][data-value="' + dataValue + '"]' );
+		const $matches = $( 'td[data-field="' + dataField + '"][data-value="' + dataValue + '"]' );
 		// The following messages can be passed here:
 		// * ext-checkuser-investigate-table-cell-hover-data-match
 		// * ext-checkuser-investigate-table-cell-pinned-data-match
@@ -58,7 +57,7 @@ module.exports = function setupTables() {
 		$( '.ext-checkuser-investigate-table' ).toggleClass( 'ext-checkuser-investigate-table-pinned', value );
 		$tableCell.toggleClass( 'ext-checkuser-investigate-table-cell-pinned', value );
 
-		toggleButtons[ getDataKey( $tableCell ) ].forEach( function ( button ) {
+		toggleButtons[ getDataKey( $tableCell ) ].forEach( ( button ) => {
 			button.setValue( value );
 			button.setFlags( { progressive: value } );
 		} );
@@ -79,7 +78,7 @@ module.exports = function setupTables() {
 	}
 
 	function addTargets( $tableCell ) {
-		var target = $tableCell.data( 'value' );
+		let target = $tableCell.data( 'value' );
 		if ( mw.util.isIPv6Address( target ) ) {
 			target += '/64';
 		}
@@ -89,11 +88,11 @@ module.exports = function setupTables() {
 
 	function appendButtons( $tableCell, buttonTypes ) {
 		// eslint-disable-next-line no-jquery/no-class-state
-		var isTarget = $tableCell.hasClass( 'ext-checkuser-compare-table-cell-target' ),
+		const isTarget = $tableCell.hasClass( 'ext-checkuser-compare-table-cell-target' ),
 			$optionsContainer = $( '<div>' ).addClass( 'ext-checkuser-investigate-table-options-container' ),
 			key = getDataKey( $tableCell ),
-			options = [],
-			selectWidget,
+			options = [];
+		let selectWidget,
 			contribsOptionWidget,
 			checksOptionWidget,
 			toggleButton,
@@ -133,7 +132,7 @@ module.exports = function setupTables() {
 				classes: [
 					'ext-checkuser-investigate-button-add-user-targets'
 				],
-				label: $tableCell.data( 'edits' ) === $tableCell.data( 'all-edits' ) ?
+				label: $tableCell.data( 'actions' ) === $tableCell.data( 'all-actions' ) ?
 					mw.msg( 'checkuser-investigate-compare-table-button-add-user-targets-log-label' ) :
 					mw.msg( 'checkuser-investigate-compare-table-button-add-user-targets-label' ),
 				data: { type: 'addUsers' }
@@ -184,17 +183,16 @@ module.exports = function setupTables() {
 		if ( buttonTypes.toolLinks ) {
 			message = mw.msg( 'checkuser-investigate-compare-toollinks', $tableCell.data( 'value' ) );
 			$links = $( '<div>' ).html( message ).find( 'a' );
-			$links.each( function ( i, $link ) {
-				var optionWidget,
-					label = $link.text,
+			$links.each( ( i, $link ) => {
+				const label = $link.text,
 					href = $link.getAttribute( 'href' );
-				optionWidget = new OO.ui.MenuOptionWidget( {
+				const optionWidget = new OO.ui.MenuOptionWidget( {
 					icon: 'globe',
 					label: label,
 					data: {
 						type: 'toolLinks',
 						href: href,
-						tool: new mw.Uri( href ).host
+						tool: new URL( href, location.href ).host
 					}
 				} );
 				setNewWindowIndicator( optionWidget );
@@ -214,8 +212,8 @@ module.exports = function setupTables() {
 				menuClass: InvestigateMenuSelectWidget
 			} );
 
-			selectWidget.getMenu().on( 'investigate', function ( item ) {
-				var data = item.getData();
+			selectWidget.getMenu().on( 'investigate', ( item ) => {
+				const data = item.getData();
 				switch ( data.type ) {
 					case 'filter':
 						filterValue( $tableCell );
@@ -250,7 +248,7 @@ module.exports = function setupTables() {
 			toggleButton.on( 'change', onToggleButtonChange.bind( null, $tableCell ) );
 			// Log the click not the change, since clicking on one button
 			// can lead to several other buttons changing
-			toggleButton.on( 'click', function () {
+			toggleButton.on( 'click', () => {
 				if ( toggleButton.getValue() ) {
 					logEvent( { action: 'pin' } );
 				}

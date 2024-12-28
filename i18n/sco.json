@@ -1,8 +1,8 @@
 {
 	"@metadata": {
 		"authors": [
-			"AmaryllisGardener"
+			"Dreamy Jazz"
 		]
 	},
-	"checkuser-blocktag": "Replace uiser pages wi:"
+	"checkuser-investigateblock-warning-confirmaction": "Gif ye'r sair that ye reelie want tae dae it, please check the \"{{int:checkuser-investigateblock-confirm-blocks-label}}\" field at the bottom."
 }

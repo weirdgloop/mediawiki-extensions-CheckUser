@@ -3,11 +3,10 @@
 -- Do not modify this file directly.
 -- See https://www.mediawiki.org/wiki/Manual:Schema_changes
 CREATE TABLE cu_changes (
-  cuc_id SERIAL NOT NULL,
+  cuc_id BIGSERIAL NOT NULL,
   cuc_namespace INT DEFAULT 0 NOT NULL,
   cuc_title TEXT DEFAULT '' NOT NULL,
   cuc_actor BIGINT NOT NULL,
-  cuc_actiontext TEXT DEFAULT '' NOT NULL,
   cuc_comment_id BIGINT NOT NULL,
   cuc_minor SMALLINT DEFAULT 0 NOT NULL,
   cuc_page_id INT DEFAULT 0 NOT NULL,
@@ -20,8 +19,7 @@ CREATE TABLE cu_changes (
   cuc_xff TEXT DEFAULT '',
   cuc_xff_hex VARCHAR(255) DEFAULT NULL,
   cuc_agent TEXT DEFAULT NULL,
-  cuc_private TEXT DEFAULT NULL,
-  cuc_only_for_read_old SMALLINT DEFAULT 0 NOT NULL,
+  cuc_agent_id BIGINT DEFAULT 0 NOT NULL,
   PRIMARY KEY(cuc_id)
 );
 
@@ -44,6 +42,7 @@ CREATE TABLE cu_log_event (
   cule_xff TEXT DEFAULT '',
   cule_xff_hex VARCHAR(255) DEFAULT NULL,
   cule_agent TEXT DEFAULT NULL,
+  cule_agent_id BIGINT DEFAULT 0 NOT NULL,
   PRIMARY KEY(cule_id)
 );
 
@@ -62,7 +61,7 @@ CREATE TABLE cu_private_event (
   cupe_id BIGSERIAL NOT NULL,
   cupe_namespace INT DEFAULT 0 NOT NULL,
   cupe_title TEXT DEFAULT '' NOT NULL,
-  cupe_actor BIGINT DEFAULT 0 NOT NULL,
+  cupe_actor BIGINT DEFAULT 0,
   cupe_log_type TEXT DEFAULT '' NOT NULL,
   cupe_log_action TEXT DEFAULT '' NOT NULL,
   cupe_params TEXT NOT NULL,
@@ -74,6 +73,7 @@ CREATE TABLE cu_private_event (
   cupe_xff TEXT DEFAULT '',
   cupe_xff_hex VARCHAR(255) DEFAULT NULL,
   cupe_agent TEXT DEFAULT NULL,
+  cupe_agent_id BIGINT DEFAULT 0 NOT NULL,
   cupe_private TEXT DEFAULT NULL,
   PRIMARY KEY(cupe_id)
 );
@@ -87,6 +87,15 @@ CREATE INDEX cupe_timestamp ON cu_private_event (cupe_timestamp);
 CREATE INDEX cupe_actor_ip_time ON cu_private_event (
   cupe_actor, cupe_ip, cupe_timestamp
 );
+
+
+CREATE TABLE cu_useragent (
+  cuua_id BIGSERIAL NOT NULL,
+  cuua_text TEXT NOT NULL,
+  PRIMARY KEY(cuua_id)
+);
+
+CREATE INDEX cuua_text ON cu_useragent (cuua_text);
 
 
 CREATE TABLE cu_useragent_clienthints (
@@ -118,6 +127,8 @@ CREATE TABLE cu_log (
   cul_actor BIGINT NOT NULL,
   cul_reason_id BIGINT NOT NULL,
   cul_reason_plaintext_id BIGINT NOT NULL,
+  cul_result_id BIGINT DEFAULT 0 NOT NULL,
+  cul_result_plaintext_id BIGINT DEFAULT 0 NOT NULL,
   cul_type TEXT NOT NULL,
   cul_target_id INT DEFAULT 0 NOT NULL,
   cul_target_text TEXT NOT NULL,

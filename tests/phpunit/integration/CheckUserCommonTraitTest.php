@@ -8,15 +8,36 @@ use MediaWiki\CheckUser\Hooks;
 use RecentChange;
 
 /**
- * Can only be used in classes that extend MediaWikiIntegrationTestCase
- * and are in the Database group.
+ * All methods except ::getDefaultRecentChangeAttribs require the test class to be a
+ * database integration test class.
  */
 trait CheckUserCommonTraitTest {
 	/**
+	 * Converts any timestamp in the expected row values to the correct format for the current database type.
+	 *
+	 * @param array $fields
+	 * @param array $expectedRow
+	 * @return array
+	 */
+	public function convertTimestampInExpectedRowToDbFormat( array $fields, array $expectedRow ): array {
+		if ( !$this->needsDB() ) {
+			throw new LogicException(
+				'When testing with timestamps in DB formats, the test cases\'s ' .
+				'needsDB() method should return true. Use @group Database.'
+			);
+		}
+		foreach ( $fields as $index => $field ) {
+			if ( in_array( $field, [ 'cuc_timestamp', 'cule_timestamp', 'cupe_timestamp' ] ) ) {
+				$expectedRow[$index] = $this->getDb()->timestamp( $expectedRow[$index] );
+			}
+		}
+		return $expectedRow;
+	}
+
+	/**
 	 * A function used to insert a RecentChange into the correct table when testing.
 	 * Called by the individual tests themselves. This method requires database support, which can be enabled
-	 * with "@group Database", or by listing the tables under testing in $this->tablesUsed, or by returning
-	 * true from needsDB().
+	 * with "@group Database", or by returning true from needsDB().
 	 *
 	 * @param array $rcAttribs The attribs for the RecentChange object
 	 * @param array $fields The fields to select from the DB when using assertSelect()
@@ -28,32 +49,25 @@ trait CheckUserCommonTraitTest {
 	): RecentChange {
 		if ( !$this->needsDB() ) {
 			throw new LogicException( 'When testing with logs, the test cases\'s needsDB()' .
-				' method should return true. Use @group Database or $this->tablesUsed.' );
+				' method should return true. Use @group Database.' );
 		}
 		$rc = new RecentChange;
 		$rc->setAttribs( $rcAttribs );
+		$this->convertTimestampInExpectedRowToDbFormat( $fields, $expectedRow );
 		( new Hooks() )->updateCheckUserData( $rc );
-		foreach ( $fields as $index => $field ) {
-			if ( in_array( $field, [ 'cuc_timestamp', 'cule_timestamp', 'cupe_timestamp' ] ) ) {
-				$expectedRow[$index] = $this->getDb()->timestamp( $expectedRow[$index] );
-			}
-		}
 		return $rc;
 	}
 
 	/**
 	 * Creates a log entry for testing. This method requires database support, which can be enabled
-	 * with "@group Database", or by listing the tables under testing in $this->tablesUsed, or by returning
-	 * true from needsDB().
-	 *
-	 * When calling this method, you should ensure that the "logging" table is in $this->tablesUsed.
+	 * with "@group Database", or by returning true from needsDB().
 	 *
 	 * @return int The ID for the created log entry
 	 */
 	public function newLogEntry(): int {
 		if ( !$this->needsDB() ) {
 			throw new LogicException( 'When testing with logs, the test cases\'s needsDB()' .
-				' method should return true. Use @group Database or $this->tablesUsed.' );
+				' method should return true. Use @group Database.' );
 		}
 		$logEntry = new ManualLogEntry( 'phpunit', 'test' );
 		$logEntry->setPerformer( $this->getTestUser()->getUserIdentity() );
@@ -65,8 +79,7 @@ trait CheckUserCommonTraitTest {
 	/**
 	 * Asserts that a table has the expected number of rows matching
 	 * the given conditions. This method requires database support, which can be enabled
-	 * with "@group Database", or by listing the tables under testing in $this->tablesUsed, or by returning
-	 * true from needsDB().
+	 * with "@group Database", or by returning true from needsDB().
 	 *
 	 * @param int $expectedRowCount The expected row count
 	 * @param string $table The table to select from
@@ -80,11 +93,11 @@ trait CheckUserCommonTraitTest {
 	) {
 		if ( !$this->needsDB() ) {
 			throw new LogicException( 'When testing with logs, the test cases\'s needsDB()' .
-				' method should return true. Use @group Database or $this->tablesUsed.' );
+				' method should return true. Use @group Database.' );
 		}
 		$this->assertSame(
 			$expectedRowCount,
-			$this->db->newSelectQueryBuilder()
+			$this->getDb()->newSelectQueryBuilder()
 				->field( $idField )
 				->table( $table )
 				->where( $where )

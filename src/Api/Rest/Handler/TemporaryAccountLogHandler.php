@@ -2,27 +2,20 @@
 
 namespace MediaWiki\CheckUser\Api\Rest\Handler;
 
+use DatabaseLogEntry;
+use LogEventsList;
+use LogPage;
 use MediaWiki\Rest\LocalizedHttpException;
 use Wikimedia\Message\DataMessageValue;
-use Wikimedia\Message\MessageValue;
 use Wikimedia\ParamValidator\ParamValidator;
-use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\IReadableDatabase;
+use Wikimedia\Rdbms\IResultWrapper;
 
-class TemporaryAccountLogHandler extends AbstractTemporaryAccountHandler {
+class TemporaryAccountLogHandler extends AbstractTemporaryAccountNameHandler {
 	/**
 	 * @inheritDoc
 	 */
-	protected function getData( int $actorId, IDatabase $dbr ): array {
-		if (
-			!( $this->config->get( 'CheckUserEventTablesMigrationStage' ) &
-				SCHEMA_COMPAT_READ_NEW )
-		) {
-			// Pretend the route doesn't exist
-			throw new LocalizedHttpException(
-				new MessageValue( 'rest-no-match' ), 404
-			);
-		}
-
+	protected function getData( $actorId, IReadableDatabase $dbr ): array {
 		$ids = $this->getValidatedParams()['ids'];
 		if ( !count( $ids ) ) {
 			throw new LocalizedHttpException(
@@ -38,17 +31,25 @@ class TemporaryAccountLogHandler extends AbstractTemporaryAccountHandler {
 				]
 			);
 		}
+
+		$ids = $this->filterOutHiddenLogs( $ids );
+
+		if ( !count( $ids ) ) {
+			// If all logs were filtered out, return a results list with no IPs
+			// which is what happens when there is no CU data for the log events.
+			return [ 'ips' => [] ];
+		}
+
 		$conds = [
 			'cule_actor' => $actorId,
 			'cule_log_id' => $ids,
 		];
 
-		$rows = $this->dbProvider->getReplicaDatabase()
-			->newSelectQueryBuilder()
+		$rows = $dbr->newSelectQueryBuilder()
 			// T327906: 'cule_actor' and 'cule_timestamp' are selected
 			// only to satisfy Postgres requirement where all ORDER BY
 			// fields must be present in SELECT list.
-			->select( [ 'cule_log_id', 'cule_ip','cule_actor', 'cule_timestamp' ] )
+			->select( [ 'cule_log_id', 'cule_ip', 'cule_actor', 'cule_timestamp' ] )
 			->from( 'cu_log_event' )
 			->where( $conds )
 			->orderBy( [ 'cule_actor', 'cule_ip', 'cule_timestamp' ] )
@@ -63,6 +64,38 @@ class TemporaryAccountLogHandler extends AbstractTemporaryAccountHandler {
 		}
 
 		return [ 'ips' => $ips ];
+	}
+
+	/**
+	 * Filter out log IDs where the authority does not have permissions to view the performer of the log.
+	 *
+	 * @param int[] $ids
+	 * @return int[]
+	 */
+	protected function filterOutHiddenLogs( array $ids ): array {
+		// Look up the logs from the DB with IDs in $ids
+		$logs = $this->performLogsLookup( $ids );
+
+		$filteredIds = [];
+		foreach ( $logs as $row ) {
+			// Only include the logs where the authority has permissions to view the performer.
+			if ( LogEventsList::userCanBitfield(
+				$row->log_deleted,
+				LogPage::DELETED_USER,
+				$this->getAuthority()
+			) ) {
+				$filteredIds[] = $row->log_id;
+			}
+		}
+
+		return $filteredIds;
+	}
+
+	protected function performLogsLookup( array $ids ): IResultWrapper {
+		return DatabaseLogEntry::newSelectQueryBuilder( $this->dbProvider->getReplicaDatabase() )
+			->where( [ 'log_id' => $ids ] )
+			->caller( __METHOD__ )
+			->fetchResultSet();
 	}
 
 	/**

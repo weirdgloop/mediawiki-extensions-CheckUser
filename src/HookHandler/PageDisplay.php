@@ -2,12 +2,14 @@
 
 namespace MediaWiki\CheckUser\HookHandler;
 
-use Config;
-use MediaWiki\Hook\BeforePageDisplayHook;
+use MediaWiki\Config\Config;
+use MediaWiki\Hook\BeforeInitializeHook;
+use MediaWiki\Output\Hook\BeforePageDisplayHook;
 use MediaWiki\Permissions\PermissionManager;
-use MediaWiki\User\UserOptionsLookup;
+use MediaWiki\User\Options\UserOptionsLookup;
+use MediaWiki\WikiMap\WikiMap;
 
-class PageDisplay implements BeforePageDisplayHook {
+class PageDisplay implements BeforePageDisplayHook, BeforeInitializeHook {
 	private Config $config;
 	private PermissionManager $permissionManager;
 	protected UserOptionsLookup $userOptionsLookup;
@@ -47,10 +49,13 @@ class PageDisplay implements BeforePageDisplayHook {
 		$user = $out->getUser();
 
 		if (
-			!$this->permissionManager->userHasRight( $user, 'checkuser-temporary-account' )
-			|| !$this->userOptionsLookup->getOption(
-				$user,
-				'checkuser-temporary-account-enable'
+			!$this->permissionManager->userHasRight( $user, 'checkuser-temporary-account-no-preference' ) &&
+			(
+				!$this->permissionManager->userHasRight( $user, 'checkuser-temporary-account' )
+				|| !$this->userOptionsLookup->getOption(
+					$user,
+					'checkuser-temporary-account-enable'
+				)
 			)
 		) {
 			return;
@@ -72,8 +77,28 @@ class PageDisplay implements BeforePageDisplayHook {
 		$out->addModuleStyles( 'ext.checkUser.styles' );
 		$out->addJSConfigVars( [
 			'wgCheckUserTemporaryAccountMaxAge' => $this->config->get( 'CheckUserTemporaryAccountMaxAge' ),
-			'wgCheckUserEventTablesMigrationStage' => $this->config->get( 'CheckUserEventTablesMigrationStage' ),
 		] );
 	}
 
+	/** @inheritDoc */
+	public function onBeforeInitialize( $title, $unused, $output, $user, $request, $mediaWikiEntryPoint ) {
+		// Is there a central wiki defined for the Special:GlobalContributions feature?
+		// If so, redirect the user there, preserving the query parameters.
+		$globalContributionsCentralWikiId = $this->config->get( 'CheckUserGlobalContributionsCentralWikiId' );
+		if ( $globalContributionsCentralWikiId &&
+			$output->getTitle()->isSpecial( 'GlobalContributions' ) &&
+			$globalContributionsCentralWikiId !== WikiMap::getCurrentWikiId() ) {
+			$url = WikiMap::getForeignURL(
+				$globalContributionsCentralWikiId,
+				'Special:GlobalContributions',
+			);
+			$queryValues = $output->getRequest()->getQueryValuesOnly();
+			// Don't duplicate the title, as we have this already from ::getForeignURL above
+			if ( isset( $queryValues['title'] ) ) {
+				unset( $queryValues['title'] );
+			}
+			$url = wfAppendQuery( $url, $queryValues );
+			$output->redirect( $url );
+		}
+	}
 }
