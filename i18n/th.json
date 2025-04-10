@@ -9,7 +9,8 @@
 			"Mopza",
 			"Octahedron80",
 			"RidJasper",
-			"Woraponboonkerd"
+			"Woraponboonkerd",
+			"Patsagorn Y."
 		]
 	},
 	"checkuser-summary": "เครื่องมือนี้สแกนการเปลี่ยนแปลงล่าสดเพื่อให้ได้มาซึ่งเลขที่อยู่ไอพีที่ผู้ใช้ใช้หรือแสดงข้อมูลการแก้ไข/ผู้ใช้เพื่อให้ได้มาซึ่งเลขที่อยู่ไอพี\nผู้ใช้และการแก้ไขโดยเลขที่อยู่ไอพีรับบริการสามารถได้มาผ่านตัวนำหน้า XFF โดยการผนวกเลขที่อยู่ไอพีกับ \"/xff\" เครื่องมือนี้รองรับ IPv4 (CIDR $1-32) และ IPv6 (CIDR $2-128)\nจะไม่คืนเกินกว่า 5,000 การแก้ไข ด้วยเหตุผลด้านสมรรถนะ\nใช้เครื่องมือนี้ตามนโยบาย",
@@ -20,11 +21,14 @@
 	"checkuser-contribs-log": "ตรวจสอบผู้ใช้",
 	"group-checkuser": "ผู้ตรวจสอบผู้ใช้",
 	"group-checkuser-member": "{{GENDER:$1|ผู้ตรวจสอบผู้ใช้}}",
+	"group-checkuser-temporary-account-viewer": "ผู้ดูไอพีบัญชีชั่วคราว",
+	"group-checkuser-temporary-account-viewer-member": "{{GENDER:$1|ผู้ดูไอพีบัญชีชั่วคราว}}",
 	"right-checkuser": "ตรวจสอบหมายเลขไอพีของผู้ใช้และข้อมูลอื่น ๆ",
 	"right-checkuser-log": "ดูรายการบันทึกการตรวจสอบผู้ใช้",
 	"action-checkuser": "ตรวจสอบเลขที่อยู่ไอพีและสารสนเทศอื่นของผู้ใช้",
 	"action-checkuser-log": "ดูรายการบันทึกการตรวจสอบผู้ใช้",
-	"grouppage-checkuser": "{{ns:project}}:ผู้ตรวจสอบผู้ใช้",
+	"grouppage-checkuser": "{{ns:project}}:การตรวจสอบผู้ใช้",
+	"grouppage-checkuser-temporary-account-viewer": "{{ns:project}}:ผู้ดูไอพีบัญชีชั่วคราว",
 	"checkuser-clienthints-name-mobile": "อุปกรณ์เคลื่อนที่",
 	"checkuser-reason": "เหตุผล:",
 	"checkuser-reason-api": "API: $1",
