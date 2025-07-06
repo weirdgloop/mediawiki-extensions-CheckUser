@@ -5,7 +5,8 @@
 			"Ahmed-Najib-Biabani-Ibrahimkhel",
 			"Amjad Khan",
 			"Baloch Khan",
-			"Dreamy Jazz"
+			"Dreamy Jazz",
+			"شاه زمان پټان"
 		]
 	},
 	"checkuser": "کره کتونکی کارن",
@@ -28,7 +29,7 @@
 	"checkuser-gblocked": "نړېواله بنديز لگېدلی",
 	"checkuser-locked": "تړل شوی",
 	"checkuser-massblock": "په ټاکلو کارنانو بنديز لگول",
-	"checkuser-search": "پلټل",
+	"checkuser-search": "د کارن يادښت ننوتنې پلټل",
 	"checkuser-search-submit": "پلټل",
 	"checkuser-log-search-target": "موخه:",
 	"checkuser-ipeditcount": "~$1 د ټولو کارنانو نه",
